@@ -4384,6 +4384,7 @@ async function loadKeys() {
     M.keys = res.keys || [];
     M.sharingMode = !!res.sharingMode;
     M.myKeyUrl = res.myKeyUrl || '';
+    M.frontendUrl = res.frontendUrl || '';
     renderKeys();
   } catch (e) {
     $('#keyBody').innerHTML = '<p class="p-6 text-center text-sm text-rose-600">' + esc(e.message || e) + '</p>';
@@ -4432,7 +4433,30 @@ function renderKeys() {
         '</div>' : '') +
     '</div>';
 
-  $('#keyBody').innerHTML = modeCard +
+  /* キーを配るURLの切り替え。
+     静的ホスト（GitHub Pages 等）へ移行したら、配るURLもそちらに向ける必要がある。
+     ここを空のままだと、GASの /exec を配り続けてしまう。 */
+  const front = M.frontendUrl || '';
+  const frontCard =
+    '<div class="rounded-xl bg-white p-3 shadow-sm ring-1 ' + (front ? 'ring-indigo-300' : 'ring-slate-200') + '">' +
+      '<div class="flex flex-wrap items-center gap-2">' +
+        '<span class="text-sm font-bold text-slate-800">キーを配るURL</span>' +
+        (front ? '<span class="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-medium text-indigo-700">静的ホスト</span>'
+               : '<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">GASの画面</span>') +
+      '</div>' +
+      '<p class="mt-1.5 text-[11px] leading-relaxed text-slate-500">' +
+        '発行するキー付きURLの行き先です。GitHub Pages などに画面を置いた場合は、そのURLを入れてください。' +
+        '<b>キー自体は変わらない</b>ので、配り直すだけで切り替わります。</p>' +
+      '<div class="mt-2 flex flex-wrap gap-1.5">' +
+        '<input id="frontUrlBox" type="url" spellcheck="false" autocomplete="off" ' +
+          'placeholder="https://ユーザー名.github.io/リポジトリ名/" value="' + esc(front) + '" ' +
+          'class="min-w-0 flex-1 basis-full rounded border border-slate-300 px-2 py-1.5 text-[11px] sm:basis-auto">' +
+        '<button id="btnFrontSave" class="shrink-0 rounded bg-indigo-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-indigo-700">保存</button>' +
+        (front ? '<button id="btnFrontClear" class="shrink-0 rounded border border-slate-300 px-3 py-1.5 text-[11px] text-slate-600 hover:bg-slate-50">GASに戻す</button>' : '') +
+      '</div>' +
+    '</div>';
+
+  $('#keyBody').innerHTML = modeCard + frontCard +
     '<div class="rounded-xl bg-amber-50 p-3 text-[11px] leading-relaxed text-amber-800 ring-1 ring-amber-200">' +
       '<p class="font-bold">キー付きURLは「合言葉」です</p>' +
       '<p class="mt-1">本人にだけ渡してください。転送された相手はその人として操作できます。漏れたときは「再発行」で古いURLを無効化します。</p>' +
@@ -5329,6 +5353,30 @@ function bindEvents() {
       if (!ok && navigator.clipboard) navigator.clipboard.writeText(inp.value).catch(() => {});
       copy.textContent = 'コピーしました';
       setTimeout(() => { copy.textContent = 'URLをコピー'; }, 2000);
+      return;
+    }
+    // キーを配るURLの保存・解除（オーナー限定。サーバー側でも requireOwner_ で弾く）
+    if (e.target.closest('#btnFrontSave')) {
+      const box = $('#frontUrlBox');
+      const v = box ? box.value.trim() : '';
+      if (!v) { toast('URLを入力してください', 'warn'); return; }
+      if (!/^https:\/\//i.test(v)) { toast('https で始まるURLを入れてください', 'warn'); return; }
+      busy(true, '設定中…');
+      try {
+        await api.setFrontendUrl(v);
+        await loadKeys();
+        toast('キーを配るURLを変更しました。各自にURLを配り直してください');
+      } catch (err) { toast('設定に失敗: ' + (err.message || err), 'err'); } finally { busy(false); }
+      return;
+    }
+    if (e.target.closest('#btnFrontClear')) {
+      if (!confirm('キーを配るURLをGASの画面に戻します。\n\nよろしいですか？')) return;
+      busy(true, '戻しています…');
+      try {
+        await api.clearFrontendUrl();
+        await loadKeys();
+        toast('GASの画面に戻しました');
+      } catch (err) { toast('failed: ' + (err.message || err), 'err'); } finally { busy(false); }
       return;
     }
     const sw = e.target.closest('#btnSharing');
