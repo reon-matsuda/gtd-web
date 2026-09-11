@@ -185,19 +185,25 @@
 <div id="stickyTop" class="sticky top-0 z-30">
 <header id="appHeader" class="bg-white/95 backdrop-blur border-b border-slate-200">
   <div class="mx-auto max-w-[1600px] px-3 sm:px-5">
-    <!-- 1段目 -->
-    <div class="flex items-center gap-3 py-2.5">
+    <!-- 1段目
+         スマホでは横に7つも並べると検索欄も絞込ボタンも潰れるため、
+         検索＋絞込をひとまとまりにして2段目へ折り返す（sm以上は従来どおり1行）。 -->
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-2 py-2.5">
       <h1 class="text-base sm:text-lg font-bold tracking-tight text-slate-900 shrink-0">
         <span class="text-indigo-600">◆</span> Task / GTD
       </h1>
-      <div class="relative flex-1 min-w-0">
-        <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="q" type="search" placeholder="キーワード検索（タスク名・メモ）"
-          class="w-full rounded-lg border border-slate-300 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100">
+      <div class="order-last flex w-full min-w-0 items-center gap-2 sm:order-none sm:w-auto sm:flex-1">
+        <div class="relative min-w-0 flex-1">
+          <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="q" type="search" placeholder="キーワード検索（タスク名・メモ）"
+            class="w-full rounded-lg border border-slate-300 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100">
+        </div>
+        <!-- スマホでは指で押せる大きさ（44px）と十分な横幅を確保する -->
+        <button id="btnFilter" class="flex min-h-[44px] shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-300 px-5 text-[13px] font-medium text-slate-600 hover:bg-slate-50 sm:min-h-0 sm:px-2.5 sm:py-2 sm:text-xs">
+          <svg class="h-4 w-4 sm:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
+          絞込<span id="filterBadge" class="hidden rounded-full bg-indigo-600 px-1.5 text-[10px] text-white">0</span>
+        </button>
       </div>
-      <button id="btnFilter" class="shrink-0 rounded-lg border border-slate-300 px-2.5 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50">
-        絞込<span id="filterBadge" class="ml-1 hidden rounded-full bg-indigo-600 px-1.5 text-[10px] text-white">0</span>
-      </button>
       <span id="ownerTools" class="contents"></span>
       <button id="btnNew" class="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">＋<span class="hidden sm:inline ml-1">新規</span></button>
       <span id="syncState" class="shrink-0"></span>
@@ -946,6 +952,7 @@ const Q = {
   flushing: false,
   idleTimer: null,
   lastError: '',
+  chunk: null,        // {done, total} 分割送信中の進捗（無言で待たせないため）
 
   persistErrors() {
     try { localStorage.setItem(QUEUE_KEY + '_err', JSON.stringify(Q.errors.slice(-50))); } catch (e) {}
@@ -1089,8 +1096,34 @@ const Q = {
       if (failed.length) toast(failed.length + '件の同期に失敗しました（次回再送します）: ' + Q.lastError, 'err');
       else if (manual && !dropped.length) toast(batch.length + '件を同期しました');
     } catch (e) {
+      /**
+       * バッチ全体が失敗した場合。
+       * ---------------------------------------------------------------
+       * ここで op 単位のエラーを記録しないと、「同期に失敗しました」という
+       * 通知だけが出て、［同期エラー］から詳細を見ることも取り下げることも
+       * できない状態になる（＝ユーザーは再送され続けるのを眺めるしかない）。
+       * 成功時の経路（r.ok === false）と同じ形で記録し、同じUIで扱えるようにする。
+       */
       Q.lastError = e.message || String(e);
-      toast('同期に失敗しました（後で再送します）: ' + Q.lastError, 'err');
+      const permanent = isPermanentError(Q.lastError);
+      ops.forEach(op => {
+        const id = op.tempId || op.id;
+        const t0 = S.tasks.find(x => x.id === id);
+        Q.errors = Q.errors.filter(x => x.id !== id).concat([{
+          id: id, name: t0 ? t0.name : '(不明なタスク)', type: op.type,
+          error: Q.lastError, at: nowStamp(), permanent: permanent
+        }]);
+      });
+      if (permanent) {
+        const drop = {};
+        ops.forEach(op => { drop[op.tempId || op.id] = true; });
+        Q.ids = Q.ids.filter(x => !drop[x.id]);
+        toast(ops.length + '件はもう同期できないため取り下げました（詳細は「同期エラー」から）', 'warn');
+      } else {
+        toast('同期に失敗しました（後で再送します）: ' + Q.lastError, 'err');
+      }
+      Q.persistErrors();
+      Q.persist();
     } finally {
       Q.flushing = false;
       renderSyncState();
@@ -1257,8 +1290,10 @@ function renderSyncState() {
   const el = $('#syncState');
   if (!el) return;
   const n = Q.ids.length;
+  // 分割送信中は「何回中の何回目か」を出す。無言で数十秒待たされると壊れたように見えるため。
+  const prog = Q.chunk ? ' ' + Q.chunk.done + '/' + Q.chunk.total : '';
   el.innerHTML = Q.flushing
-    ? '<span class="inline-flex items-center gap-1 rounded-lg bg-indigo-50 px-2 py-1.5 text-[11px] text-indigo-700"><span class="h-2 w-2 animate-ping rounded-full bg-indigo-500"></span>同期中…</span>'
+    ? '<span class="inline-flex items-center gap-1 rounded-lg bg-indigo-50 px-2 py-1.5 text-[11px] text-indigo-700"><span class="h-2 w-2 animate-ping rounded-full bg-indigo-500"></span>同期中' + prog + '…</span>'
     : n
       ? '<span class="inline-flex items-center gap-1">' +
           '<button id="btnSync" class="rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] font-medium text-amber-800 hover:bg-amber-100">未同期 ' + n + '件 · 今すぐ同期</button>' +
@@ -1298,13 +1333,25 @@ function localSave(task) {
 const RPC_TIMEOUT = 30000;
 const RPC_RETRY = 2;
 
+/**
+ * 1回のPOSTに載せる操作の最大件数。
+ * -------------------------------------------------------------------------
+ * ⚠️ バイト数だけで切るのでは足りない。サーバー側は1件ごとに
+ *    スクリプトロックを取り、数千行のシートから対象行を探すため、
+ *    件数が増えると時間で先に頭を打つ（実測：29件で30秒を超えた）。
+ *    小さく刻めば1回あたり数秒で終わり、途中で切られなくなる。
+ */
+const OPS_PER_CHUNK = 8;
+/** 分割送信の1回あたりの待ち時間。件数に応じて伸ばす。 */
+function batchTimeout(n) { return Math.min(180000, 20000 + n * 8000); }
+
 function newNonce() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
 
-async function rpcOnce(method, args, nonce) {
+async function rpcOnce(method, args, nonce, timeoutMs) {
   const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), RPC_TIMEOUT) : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs || RPC_TIMEOUT) : null;
   try {
     const res = await fetch(APP_URL, {
       method: 'POST',
@@ -1324,13 +1371,13 @@ async function rpcOnce(method, args, nonce) {
   }
 }
 
-async function rpcCall(method, args) {
+async function rpcCall(method, args, timeoutMs) {
   if (!APP_URL) throw new Error('接続先が設定されていません。config.js の apiUrl を確認してください。');
   let last = null;
   for (let attempt = 0; attempt <= RPC_RETRY; attempt++) {
     const nonce = newNonce();
     try {
-      const json = await rpcOnce(method, args, nonce);
+      const json = await rpcOnce(method, args, nonce, timeoutMs);
       if (json.ok) {
         if (json.email) setAppEmail(json.email);
         return json.result;
@@ -1361,7 +1408,10 @@ function byteLen(s) {
   return unescape(encodeURIComponent(String(s))).length;   // 古い環境向けの代替
 }
 
-/** ops を MAX_POST_BYTES 以内の塊に切り分ける。opId は通し番号のまま保つ。 */
+/**
+ * ops を「バイト数」と「件数」の両方で切り分ける。opId は通し番号のまま保つ。
+ * どちらか先に上限へ達した時点で塊を区切る。
+ */
 function chunkOps(ops) {
   const LIMIT = Math.floor(MAX_POST_BYTES * 0.8);   // 封筒（method名・キー等）の分を残す
   const out = [];
@@ -1369,24 +1419,65 @@ function chunkOps(ops) {
   (ops || []).forEach(op => {
     const b = byteLen(JSON.stringify(op)) + 1;
     // 1件だけで上限を超える場合は、分割しようがないので単独で送る
-    if (cur.length && size + b > LIMIT) { out.push(cur); cur = []; size = 0; }
+    if (cur.length && (size + b > LIMIT || cur.length >= OPS_PER_CHUNK)) {
+      out.push(cur); cur = []; size = 0;
+    }
     cur.push(op); size += b;
   });
   if (cur.length) out.push(cur);
   return out;
 }
 
+/** 分割送信の進捗を画面に出す（無言で数十秒待たせない） */
+function reportChunk(done, total) {
+  try {
+    if (typeof Q === 'undefined') return;
+    Q.chunk = (total > 1) ? { done: done, total: total } : null;
+    if (typeof renderSyncState === 'function') renderSyncState();
+  } catch (e) {}
+}
+
+/**
+ * applyBatch を分割して送る。
+ * -------------------------------------------------------------------------
+ * ⚠️ ここで例外を投げてはいけない。
+ *    途中の塊が失敗したときに全体を失敗にすると、
+ *    【すでにサーバーへ保存済みの操作まで未送信扱いでキューに残り】、
+ *    永久に再送し続ける状態になる（実際に29/35件で発生）。
+ *    そこで、失敗した塊の操作だけを results に「失敗」として詰め、
+ *    成功した塊の結果はそのまま返す。呼び出し側（Q.flush）は
+ *    成功分をキューから外し、失敗分だけ次回に回せる。
+ *
+ *    再送しても安全なのは、各操作がクライアントIDを持っていて
+ *    「同じ内容を2回適用しても1行しかできない」ためである。
+ */
 async function applyBatchChunked(ops) {
-  const chunks = chunkOps(ops || []);
-  if (chunks.length <= 1) return await rpcCall('applyBatch', [ops || []]);
-  let applied = 0;
+  const list = ops || [];
+  const chunks = chunkOps(list);
+  let applied = 0, okChunks = 0;
   const results = [];
-  for (const c of chunks) {
-    const r = await rpcCall('applyBatch', [c]);
-    applied += Number((r && r.applied) || 0);
-    (r && r.results ? r.results : []).forEach(x => results.push(x));
+  let lastError = null;
+
+  for (let i = 0; i < chunks.length; i++) {
+    reportChunk(i, chunks.length);
+    const c = chunks[i];
+    try {
+      const r = await rpcCall('applyBatch', [c], batchTimeout(c.length));
+      applied += Number((r && r.applied) || 0);
+      (r && r.results ? r.results : []).forEach(x => results.push(x));
+      okChunks++;
+    } catch (err) {
+      // この塊は落ちた。残りの塊は続行する（通信の一時的な失敗なら次は通る）
+      lastError = err;
+      const msg = String((err && err.message) || err);
+      c.forEach(op => results.push({ opId: op.opId, type: op.type, ok: false, error: msg }));
+    }
   }
-  return { applied: applied, results: results };
+  reportChunk(chunks.length, 0);
+
+  // 全部の塊が落ちた場合だけ、従来どおり例外として扱う（接続不能と区別がつかないため）
+  if (chunks.length && !okChunks) throw lastError || new Error('同期できませんでした');
+  return { applied: applied, results: results, chunks: chunks.length, failedChunks: chunks.length - okChunks };
 }
 
 const api = new Proxy({}, {
@@ -4363,12 +4454,33 @@ function projMilestones(p) {
   return [];
 }
 
+/**
+ * 目標・期限の1行。
+ * -------------------------------------------------------------------------
+ * 狭い画面では【目標を1行目いっぱい／期限と削除を2行目】に折り返す。
+ * 1行に詰め込むと目標欄が130pxほどしか残らず、実質使えないため。
+ * 期限欄は日付表示に必要な幅（8.5rem）だけを与え、それ以上広げない。
+ */
+/**
+ * 目標・期限の1行。
+ * -------------------------------------------------------------------------
+ * flex の折り返しだと、日付入力欄が自前の最小幅を主張して横スクロールを生む。
+ * グリッドで列幅を明示し、伸びる列を minmax(0,1fr) にすることで、
+ * 目標欄だけが伸び、日付欄は固定幅、はみ出しは起きない形にする。
+ *
+ *   スマホ:  [番号] [目標 ..................]
+ *            [    ] [日付] [✕]
+ *   sm以上:  [番号] [目標 ........] [日付] [✕]
+ */
 function msRowHtml(m, i) {
-  return '<div class="pms flex items-start gap-1.5">' +
-    '<span class="mt-2 w-5 shrink-0 text-center text-[11px] text-slate-400">' + (i + 1) + '</span>' +
-    '<input class="pms-goal inp flex-1" placeholder="目標（例：全教材の改訂を完了）" value="' + esc(m.goal || '') + '">' +
-    '<input class="pms-due inp w-36 shrink-0" type="date" value="' + esc(m.due || '') + '">' +
-    '<button type="button" class="pms-del mt-1 shrink-0 rounded px-2 py-1 text-xs text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="この行を削除">✕</button>' +
+  return '<div class="pms grid items-center gap-x-2 gap-y-1.5 ' +
+      'grid-cols-[1.25rem_minmax(0,1fr)_auto] sm:grid-cols-[1.25rem_minmax(0,1fr)_9.5rem_auto]">' +
+    '<span class="text-center text-[11px] text-slate-400">' + (i + 1) + '</span>' +
+    '<input class="pms-goal inp col-span-2 min-w-0 sm:col-span-1" ' +
+      'placeholder="目標（例：全教材の改訂を完了）" value="' + esc(m.goal || '') + '">' +
+    '<input class="pms-due inp col-start-2 w-full min-w-0 max-w-[9.5rem] px-2 text-[13px] sm:col-start-3 sm:max-w-none" ' +
+      'type="date" value="' + esc(m.due || '') + '">' +
+    '<button type="button" class="pms-del justify-self-end rounded px-2.5 py-1.5 text-xs text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="この行を削除">✕</button>' +
   '</div>';
 }
 
