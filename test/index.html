@@ -61,6 +61,14 @@
        ユーティリティを再実装するのではなく、アプリ固有の要素に素のCSSを当てて
        「崩れているが使える」状態を確保する。通常時は一切影響しない。
        ===================================================================== */
+    /* ⚠️ 最重要：代替CSSでは「隠す」手段を自前で用意する。
+       モーダルの開閉は Tailwind の .hidden クラスで行っているが、
+       そのTailwindが読めていないのがこの状態なので、.hidden は存在しない。
+       ここで定義しないと【すべてのモーダルが開きっぱなしになり、✕も閉じるボタンも効かない】。
+       下の html.no-tw #bottomNav{display:flex} などはID指定で強いため、!important が要る。
+       html.no-tw の中だけに閉じているので、通常時の hidden sm:inline などには影響しない。 */
+    html.no-tw .hidden{ display:none !important; }
+
     html.no-tw body{ font-size:14px; color:#1e293b; }
     html.no-tw #stickyTop{ background:#fff; border-bottom:1px solid #cbd5e1; }
     html.no-tw #appHeader{ background:#fff; padding:8px 10px; }
@@ -4178,12 +4186,40 @@ function inAppBrowser() {
   return '';
 }
 
+/**
+ * デザインの読み込みを少し待って再判定する。
+ * -------------------------------------------------------------------------
+ * 判定した瞬間にまだ到着していなかっただけ、という場合がある。
+ * 一度 no-tw に落ちたまま固定されると、見た目が崩れた状態で使い続けることになるので、
+ * 5秒ほどのあいだ様子を見て、届いたら通常表示へ戻す。
+ */
+let __twRecheckTimer = 0;
+function scheduleTwRecheck() {
+  if (__twRecheckTimer) return;
+  let tries = 0;
+  __twRecheckTimer = setInterval(() => {
+    tries++;
+    if (tailwindLoaded()) {
+      clearInterval(__twRecheckTimer); __twRecheckTimer = 0;
+      document.documentElement.classList.remove('no-tw');
+      renderCompatBar();
+      return;
+    }
+    if (tries >= 10) { clearInterval(__twRecheckTimer); __twRecheckTimer = 0; }
+  }, 500);
+}
+
 function renderCompatBar() {
   const bar = $('#compatBar');
   if (!bar) return;
   const app = inAppBrowser();
   const noTw = !tailwindLoaded();
-  if (noTw) document.documentElement.classList.add('no-tw');
+  if (noTw) {
+    document.documentElement.classList.add('no-tw');
+    scheduleTwRecheck();          // 単に到着が遅れているだけかもしれない
+  } else {
+    document.documentElement.classList.remove('no-tw');
+  }
   if (!app && !noTw) { bar.hidden = true; bar.innerHTML = ''; return; }
 
   const url = KeyStore.url() || APP_URL || '';
