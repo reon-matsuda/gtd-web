@@ -34,14 +34,22 @@
   .hint{ font-size:12px; color:#64748b; margin-top:6px; }
   code{ background:#f1f5f9; padding:1px 5px; border-radius:4px; font-size:12px; }
   .ver{ font-size:11px; color:#94a3b8; margin-top:14px; text-align:right; }
+  table.probe{ width:100%; border-collapse:collapse; margin-top:8px; font-size:12px;
+    font-variant-numeric:tabular-nums; }
+  table.probe th, table.probe td{ border-bottom:1px solid #e2e8f0; padding:4px 6px; text-align:right; }
+  table.probe th{ color:#64748b; font-weight:600; font-size:11px; }
+  table.probe td:last-child, table.probe th:last-child{ text-align:left; }
+  .big{ font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .copybox{ width:100%; min-height:120px; font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:11px; border:1px solid #cbd5e1; border-radius:8px; padding:8px; margin-top:8px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>GAS 疎通テスト <span style="font-size:12px;color:#94a3b8;font-weight:400;">v2</span></h1>
+  <h1>GAS 疎通テスト <span style="font-size:12px;color:#94a3b8;font-weight:400;">v3</span></h1>
   <p class="lead">
-    画面を GitHub Pages に置き、Apps Script をデータ用APIとして使う構成が成立するかを確かめます。
-    とくに <b>POST が POST のまま届くか</b>（リダイレクトでGETに降格しないか）を判定します。
+    POST本文の<b>上限サイズを自動で探します</b>。小さいPOSTから始めて倍々に増やし、
+    届かなくなった境目を二分探索で詰めます。10回ほど通信します。
   </p>
 
   <div class="card">
@@ -59,14 +67,13 @@
   </div>
 
   <div id="out" class="res"></div>
-  <p class="ver">v2 — POST降格の検出と大きい本文の試験を追加</p>
+  <p class="ver">v3 — POST本文の上限を二分探索で特定</p>
 </div>
 
 <script>
 const $ = s => document.querySelector(s);
 const LS = 'gasProbe';
 
-/* 入力値の保存・復元 */
 try {
   const saved = JSON.parse(localStorage.getItem(LS) || '{}');
   if (saved.url) $('#url').value = saved.url;
@@ -75,7 +82,6 @@ try {
 } catch (e) {}
 if (!$('#key').value) $('#key').value = 'testkey123';
 
-/* URLに ?url= / ?key= が付いていればそちらを優先 */
 (function () {
   const q = new URLSearchParams(location.search);
   if (q.get('url')) $('#url').value = q.get('url');
@@ -90,15 +96,14 @@ function card(id, title) {
   $('#out').appendChild(el);
   return el;
 }
-
-function done(el, ok, title, msg, data) {
+function done(el, ok, title, msg, extraHtml) {
   el.className = 't ' + (ok ? 'ok' : 'ng');
   el.innerHTML = '<b>' + (ok ? '✅ ' : '❌ ') + title + '</b>' +
-    '<span class="msg">' + msg + '</span>' +
-    (data ? '<pre>' + String(data).slice(0, 1000) + '</pre>' : '');
+    '<span class="msg">' + msg + '</span>' + (extraHtml || '');
 }
+const kb = n => (n / 1024).toFixed(1) + 'KB';
 
-/* 共通：POSTしてJSONを返す（text/plain なのでプリフライトなし） */
+/* text/plain にしておくとプリフライト（事前確認の通信）が起きない */
 async function post(base, body) {
   const res = await fetch(base, {
     method: 'POST',
@@ -111,7 +116,7 @@ async function post(base, body) {
   return { res, text, json };
 }
 
-/* ① GET + fetch（CORSを越えて読めるか） */
+/* ① GET（CORSを越えて読めるか） */
 async function testGet(base, key) {
   const el = card('t1', '① GET（fetch / CORS）');
   const t0 = Date.now();
@@ -119,83 +124,92 @@ async function testGet(base, key) {
     const u = base + (base.indexOf('?') < 0 ? '?' : '&') +
       'api=1&method=ping&key=' + encodeURIComponent(key);
     const res = await fetch(u, { method: 'GET' });
-    const text = await res.text();
-    let json = null;
-    try { json = JSON.parse(text); } catch (e) {}
+    const json = JSON.parse(await res.text());
     if (json && json.ok) {
       done(el, true, '① GET（fetch / CORS）',
-        'CORSを越えて読めました（' + (Date.now() - t0) + 'ms）。サーバー時刻 ' + (json.serverTime || '-'),
-        JSON.stringify(json, null, 1));
+        '読めました（' + (Date.now() - t0) + 'ms）／サーバー時刻 ' + (json.serverTime || '-'));
       return true;
     }
-    done(el, false, '① GET（fetch / CORS）',
-      'HTTP ' + res.status + ' — JSONとして読めませんでした', text.slice(0, 600));
+    done(el, false, '① GET（fetch / CORS）', 'HTTP ' + res.status + ' — 読めませんでした');
     return false;
   } catch (err) {
-    done(el, false, '① GET（fetch / CORS）',
-      'ブロックされました: ' + err.message + '（CORSでの読み取り不可）');
+    done(el, false, '① GET（fetch / CORS）', 'ブロックされました: ' + err.message);
     return false;
   }
 }
 
-/* ② POST（小）— ここが本題。via が POST でなければ降格している */
+/* 指定バイト数の本文をPOSTして、POSTのまま全部届いたかを返す */
+async function probeSize(base, key, n) {
+  const skeleton = JSON.stringify({ ping: true, auth: key, pad: '' });
+  const pad = 'x'.repeat(Math.max(0, n - skeleton.length));
+  const body = { ping: true, auth: key, pad: pad };
+  const sent = JSON.stringify(body).length;
+  try {
+    const { json } = await post(base, body);
+    const via = json ? String(json.via || '?') : '(応答なし)';
+    const got = json ? Number(json.bytes || 0) : -1;
+    const ok = !!(json && json.ok && via === 'POST' && got >= sent * 0.9);
+    return { ok, sent, got, via };
+  } catch (err) {
+    return { ok: false, sent, got: -1, via: 'エラー: ' + err.message };
+  }
+}
+
+/* ② POST（小）— まずPOSTが成立することを確認 */
 async function testPostSmall(base, key) {
-  const el = card('t2', '② POST が POST のまま届くか');
-  const t0 = Date.now();
-  try {
-    const { res, text, json } = await post(base, { ping: true, auth: key });
-    if (!json || !json.ok) {
-      done(el, false, '② POST が POST のまま届くか',
-        'HTTP ' + res.status + ' — JSONとして読めませんでした', text.slice(0, 600));
-      return 'fail';
-    }
-    if (json.via === 'POST') {
-      done(el, true, '② POST が POST のまま届くか',
-        'POSTのまま doPost に届きました（' + (Date.now() - t0) + 'ms）',
-        JSON.stringify(json, null, 1));
-      return 'post';
-    }
-    done(el, false, '② POST が POST のまま届くか',
-      '応答はありましたが via=' + (json.via || '不明') +
-      ' — リダイレクトでGETに降格しています', JSON.stringify(json, null, 1));
-    return 'downgraded';
-  } catch (err) {
-    done(el, false, '② POST が POST のまま届くか', 'ブロックされました: ' + err.message);
-    return 'fail';
+  const el = card('t2', '② 小さいPOSTが POST のまま届くか');
+  const r = await probeSize(base, key, 200);
+  if (r.ok) {
+    done(el, true, '② 小さいPOSTが POST のまま届くか',
+      'via=POST ／ 送信 ' + r.sent + ' → 受信 ' + r.got + ' バイト');
+    return true;
   }
+  done(el, false, '② 小さいPOSTが POST のまま届くか',
+    'via=' + r.via + ' ／ 送信 ' + r.sent + ' → 受信 ' + r.got + ' バイト');
+  return false;
 }
 
-/* ③ POST（大）— まとめ書き（applyBatch）に耐えるか */
-async function testPostLarge(base, key) {
-  const SIZE = 120000;
-  const el = card('t3', '③ 大きい本文のPOST（約120KB）');
-  const t0 = Date.now();
-  try {
-    const body = { ping: true, auth: key, pad: 'x'.repeat(SIZE) };
-    const sent = JSON.stringify(body).length;
-    const { res, text, json } = await post(base, body);
-    if (!json || !json.ok) {
-      done(el, false, '③ 大きい本文のPOST（約120KB）',
-        'HTTP ' + res.status + ' — 応答を読めませんでした（送信 ' + sent + ' バイト）',
-        text.slice(0, 600));
-      return false;
-    }
-    if (json.via !== 'POST') {
-      done(el, false, '③ 大きい本文のPOST（約120KB）',
-        'via=' + (json.via || '不明') + ' — 本文が失われています', JSON.stringify(json, null, 1));
-      return false;
-    }
-    const got = Number(json.bytes || 0);
-    const ok = got >= sent * 0.9;
-    done(el, ok, '③ 大きい本文のPOST（約120KB）',
-      (ok ? '欠けずに届きました' : '届いた本文が短くなっています') +
-      '（送信 ' + sent + ' → 受信 ' + got + ' バイト / ' + (Date.now() - t0) + 'ms）',
-      JSON.stringify(Object.assign({}, json, { pad: undefined }), null, 1));
-    return ok;
-  } catch (err) {
-    done(el, false, '③ 大きい本文のPOST（約120KB）', 'ブロックされました: ' + err.message);
-    return false;
+/* ③ 上限の特定：倍々で増やして失敗地点を見つけ、そこを二分探索で詰める */
+async function findLimit(base, key) {
+  const el = card('t3', '③ POST本文の上限を探索中');
+  const rows = [];
+  const render = (extra) => {
+    let html = '<table class="probe"><tr><th>試したサイズ</th><th>受信</th>' +
+      '<th>via</th><th>結果</th></tr>';
+    rows.forEach(r => {
+      html += '<tr><td>' + kb(r.sent) + '</td><td>' + (r.got < 0 ? '—' : kb(r.got)) +
+        '</td><td>' + r.via + '</td><td>' + (r.ok ? '✅ 到達' : '❌ 欠落') + '</td></tr>';
+    });
+    html += '</table>' + (extra || '');
+    el.innerHTML = '<b>' + (extra ? '' : '⏳ ') + '③ POST本文の上限を探索</b>' +
+      '<span class="msg">小さい方から倍々に増やし、失敗した区間を二分探索で詰めます。</span>' + html;
+  };
+
+  let lo = 0, hi = 0;
+  for (const n of [4096, 8192, 16384, 32768, 65536, 131072]) {
+    const r = await probeSize(base, key, n);
+    rows.push(r); render();
+    if (r.ok) lo = r.sent; else { hi = r.sent; break; }
   }
+
+  if (!hi) {
+    el.className = 't ok';
+    render('<p class="msg" style="margin-top:8px;">128KBまで全部通りました。実用上の上限は見つかりません。</p>');
+    return { limit: lo, capped: true };
+  }
+
+  for (let i = 0; i < 8 && hi - lo > 512; i++) {
+    const mid = Math.floor((lo + hi) / 2);
+    const r = await probeSize(base, key, mid);
+    rows.push(r); render();
+    if (r.ok) lo = r.sent; else hi = r.sent;
+  }
+
+  el.className = 't ok';
+  render('<p class="msg" style="margin-top:8px;">' +
+    '通った最大 <b>' + kb(lo) + '</b>（' + lo + ' バイト）／ 落ちた最小 <b>' + kb(hi) + '</b>' +
+    '</p>');
+  return { limit: lo, upper: hi, capped: false };
 }
 
 /* ④ POST経由でメソッドを呼ぶ（本番と同じ形） */
@@ -203,16 +217,14 @@ async function testRpc(base, key) {
   const el = card('t4', '④ POSTでメソッド呼び出し（getSyncState）');
   const t0 = Date.now();
   try {
-    const { res, text, json } = await post(base, { method: 'getSyncState', args: [], auth: key });
+    const { res, json } = await post(base, { method: 'getSyncState', args: [], auth: key });
     if (json && json.ok) {
       done(el, true, '④ POSTでメソッド呼び出し（getSyncState）',
-        '結果 ' + JSON.stringify(json.result) + '（' + (Date.now() - t0) + 'ms）',
-        JSON.stringify(json, null, 1));
+        '結果 ' + JSON.stringify(json.result) + '（' + (Date.now() - t0) + 'ms）');
       return true;
     }
     done(el, false, '④ POSTでメソッド呼び出し（getSyncState）',
-      (json && json.error) ? json.error : ('HTTP ' + res.status + ' — 読めませんでした'),
-      (text || '').slice(0, 600));
+      (json && json.error) ? json.error : ('HTTP ' + res.status));
     return false;
   } catch (err) {
     done(el, false, '④ POSTでメソッド呼び出し（getSyncState）', err.message);
@@ -228,8 +240,7 @@ $('#run').onclick = async () => {
 
   if (!/^https:\/\/script\.google\.com\/.*\/exec/.test(base)) {
     $('#out').innerHTML = '<div class="t ng"><b>❌ URLを確認してください</b>' +
-      '<span class="msg">末尾が <code>/exec</code> のURLを入れてください。' +
-      '<code>/dev</code> や <code>/a/ドメイン/</code> が入っていると動きません。</span></div>';
+      '<span class="msg">末尾が <code>/exec</code> のURLを入れてください。</span></div>';
     return;
   }
   if (!key) {
@@ -242,38 +253,48 @@ $('#run').onclick = async () => {
 
   $('#run').disabled = true;
   const r1 = await testGet(base, key);
-  const r2 = await testPostSmall(base, key);
-  const r3 = (r2 === 'post') ? await testPostLarge(base, key) : false;
-  const r4 = (r2 === 'post') ? await testRpc(base, key) : false;
+  const r2 = r1 ? await testPostSmall(base, key) : false;
+  const lim = r2 ? await findLimit(base, key) : null;
+  const r4 = r2 ? await testRpc(base, key) : false;
   $('#run').disabled = false;
 
   const v = document.createElement('div');
-  if (r1 && r2 === 'post' && r3 && r4) {
+  if (r1 && r2 && lim && r4) {
+    const safe = Math.floor(lim.limit / 2 / 1024) * 1024;
     v.className = 'verdict ok';
-    v.innerHTML = '🎉 POST方式で進められます。<br>' +
-      '<span class="msg">読み書きともに通り、まとめ書きに必要な本文量も運べました。' +
-      'アクセスキーをURLに出さない設計にできます。</span>';
-  } else if (r1 && r2 === 'post') {
+    v.innerHTML = '🎉 この構成で進められます。<br>' +
+      '<span class="msg">読み書きともに成立。POST本文は ' +
+      (lim.capped ? '<b>128KB以上</b>まで通りました' : '<b>' + kb(lim.limit) + '</b>まで通りました') +
+      '。1回あたり <b>' + kb(safe) + '</b> ずつに分けて送る設計にします。</span>';
+  } else if (r1 && r2) {
     v.className = 'verdict wait';
-    v.innerHTML = '△ POSTは通るが、一部に制限あり。<br>' +
-      '<span class="msg">③か④が失敗しました。まとめ書きの分割などで回避できる見込みです。' +
-      'この結果を貼ってください。</span>';
-  } else if (r1 && r2 === 'downgraded') {
-    v.className = 'verdict wait';
-    v.innerHTML = '△ POSTがGETに降格しています。<br>' +
-      '<span class="msg">読み取りは可能ですが、書き込みはURLに載せる方式になり、' +
-      '一度に送れる量に上限が出ます。設計を調整します。この結果を貼ってください。</span>';
+    v.innerHTML = '△ POSTは通るが、一部が失敗。<br>' +
+      '<span class="msg">下の結果を貼ってください。</span>';
   } else if (r1) {
     v.className = 'verdict wait';
     v.innerHTML = '△ 読み取りのみ成功。<br>' +
-      '<span class="msg">POSTが届きませんでした。この結果を貼ってください。</span>';
+      '<span class="msg">POSTが届きませんでした。結果を貼ってください。</span>';
   } else {
     v.className = 'verdict ng';
-    v.innerHTML = '✕ この構成は成立しません。<br>' +
-      '<span class="msg">読み取りも通りませんでした。デプロイの「アクセスできるユーザー」が' +
-      '「全員」になっているか確認し、それでも同じならこの結果を貼ってください。</span>';
+    v.innerHTML = '✕ 読み取りも通りませんでした。<br>' +
+      '<span class="msg">デプロイの「アクセスできるユーザー」が「全員」か確認してください。</span>';
   }
   $('#out').appendChild(v);
+
+  /* 報告用にまとめてコピーできるようにする */
+  const sum = document.createElement('div');
+  sum.className = 'card';
+  sum.innerHTML = '<label>この内容をそのまま貼ってください</label>' +
+    '<textarea class="copybox" readonly id="sumbox"></textarea>';
+  $('#out').appendChild(sum);
+  $('#sumbox').value = [
+    '端末: ' + navigator.userAgent,
+    '① GET: ' + (r1 ? 'OK' : 'NG'),
+    '② 小POST: ' + (r2 ? 'OK (via=POST)' : 'NG'),
+    '③ 上限: ' + (lim ? (lim.capped ? '128KB以上（未検出）'
+      : lim.limit + ' バイトまで到達 / ' + lim.upper + ' バイトで欠落') : '未実施'),
+    '④ メソッド呼び出し: ' + (r4 ? 'OK' : 'NG')
+  ].join('\n');
 };
 </script>
 </body>
