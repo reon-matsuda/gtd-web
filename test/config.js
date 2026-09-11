@@ -12,7 +12,7 @@
  *    ?key=… 付きのURLで渡し、各自のブラウザに保存させます。
  * =======================================================================*/
 window.GTD_CONFIG = {
-  apiUrl: 'https://script.google.com/macros/s/ここにデプロイIDを貼る/exec',
+  apiUrl: 'https://script.google.com/macros/s/AKfycbxZQ-htaK8FD8SJDpWXgyhw5LuodkXxeOUJ27fuGZ5HdoFP6lcgPpx_O-BkAKOB3aScyQ/exec',
 
   /* 1回のPOSTで送る本文の上限（バイト）。サーバーの MAX_POST_BYTES と合わせること。
      実測で128KBまで通ったので、その半分を安全幅として採用しています。 */
