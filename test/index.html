@@ -9,7 +9,13 @@
   <script src="config.js"></script>
   <style>
     :root { --brand:#4f46e5; --done:#10B981; }
-    html,body{height:100%}
+    /* ⚠️ body を height:100% にしてはいけない。
+       position:sticky は「親要素の箱の中」でしか粘れないため、body の高さが
+       画面1枚分に固定されていると、そこを過ぎた瞬間にヘッダーが一緒に流れていく。
+       （実測：スクロール900pxでヘッダーの上端が -301px ＝ 画面外）
+       min-height にして、内容にあわせて body の箱が伸びるようにする。 */
+    html{height:100%}
+    body{min-height:100%}
     body{background:#f4f5f7;-webkit-font-smoothing:antialiased;
       font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",sans-serif;}
     ::-webkit-scrollbar{width:9px;height:9px}
@@ -44,6 +50,20 @@
     #stickyTop{ position:-webkit-sticky; position:sticky; top:0; z-index:30;
       transition:transform .22s cubic-bezier(.22,.61,.36,1); will-change:transform; }
     #stickyTop.hdr-hidden{ transform:translateY(-100%); }
+    /* 収納中は上端に細い手がかりを出す（マウスがある環境だけ）。
+       何も出ていないと「戻し方が分からない」ので、ここへカーソルを寄せれば
+       戻ることを示す。カーソル判定の邪魔をしないよう pointer-events は切る。 */
+    #hdrPeek{ display:none; }
+    @media (hover: hover) and (pointer: fine) {
+      #hdrPeek{ display:block; position:fixed; left:0; right:0; top:0; height:3px; z-index:29;
+        background:linear-gradient(to bottom, rgba(79,70,229,.5), rgba(79,70,229,0));
+        opacity:0; transition:opacity .2s ease; pointer-events:none; }
+      html.hdr-tucked #hdrPeek{ opacity:1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #stickyTop{ transition:none; }
+      #hdrPeek{ transition:none; }
+    }
     /* ⚠️ Tailwind の preflight にある [hidden]{display:none} は、あとから来る
        ユーティリティ（.flex / .block / .grid など）と詳細度が同じため負ける。
        hidden 属性を付けても .flex のラベルが消えず、絞り込みが効かない原因になる。
@@ -190,6 +210,8 @@
 </div>
 
 <!-- ===================== ヘッダー（検索・タブ・操作バーを1ブロックで固定） ===================== -->
+<!-- ヘッダー収納中の手がかり（PCのみ表示。CSSで制御） -->
+<div id="hdrPeek" aria-hidden="true"></div>
 <div id="stickyTop" class="sticky top-0 z-30">
 <header id="appHeader" class="bg-white/95 backdrop-blur border-b border-slate-200">
   <div class="mx-auto max-w-[1600px] px-3 sm:px-5">
@@ -4391,6 +4413,21 @@ async function loadKeys() {
   }
 }
 
+/**
+ * いまこの画面が置かれているURL（末尾の index.html とクエリは落とす）。
+ * -------------------------------------------------------------------------
+ * 配布用URLの入力補助に使う。GASが配信している画面は
+ * googleusercontent.com のiframe内で動き、そのアドレスは毎回変わるうえ
+ * 他人に配れないので、その場合は空を返して補助を出さない。
+ */
+function selfBaseUrl() {
+  try {
+    if (/script\.google\.com|googleusercontent\.com/i.test(location.hostname)) return '';
+    if (!/^https?:$/.test(location.protocol)) return '';
+    return location.origin + location.pathname.replace(/index\.html?$/i, '');
+  } catch (e) { return ''; }
+}
+
 function renderKeys() {
   const rows = (M.keys || []).map(k =>
     '<div class="rounded-xl bg-white p-3 shadow-sm ring-1 ' + (k.enabled ? 'ring-slate-200' : 'ring-rose-200') + '">' +
@@ -4437,6 +4474,10 @@ function renderKeys() {
      静的ホスト（GitHub Pages 等）へ移行したら、配るURLもそちらに向ける必要がある。
      ここを空のままだと、GASの /exec を配り続けてしまう。 */
   const front = M.frontendUrl || '';
+  /* いま自分が表示されているURL。静的ホストで開いているときだけ意味を持つ。
+     GASの画面はiframe（googleusercontent.com）の中なので、配布先には使えない。 */
+  const here = selfBaseUrl();
+  const mismatch = !!(front && here && front.replace(/\/+$/, '') !== here.replace(/\/+$/, ''));
   const frontCard =
     '<div class="rounded-xl bg-white p-3 shadow-sm ring-1 ' + (front ? 'ring-indigo-300' : 'ring-slate-200') + '">' +
       '<div class="flex flex-wrap items-center gap-2">' +
@@ -4447,13 +4488,22 @@ function renderKeys() {
       '<p class="mt-1.5 text-[11px] leading-relaxed text-slate-500">' +
         '発行するキー付きURLの行き先です。GitHub Pages などに画面を置いた場合は、そのURLを入れてください。' +
         '<b>キー自体は変わらない</b>ので、配り直すだけで切り替わります。</p>' +
+      (mismatch ?
+        '<p class="mt-2 rounded-lg bg-amber-50 p-2 text-[11px] leading-relaxed text-amber-800 ring-1 ring-amber-200">' +
+          '⚠️ 設定されているURLが、<b>いま開いているこの画面のURLと違います</b>。' +
+          'このままだと、配った人は別のページに飛びます。<br>' +
+          'この画面: <code class="rounded bg-white px-1">' + esc(here) + '</code></p>' : '') +
       '<div class="mt-2 flex flex-wrap gap-1.5">' +
         '<input id="frontUrlBox" type="url" spellcheck="false" autocomplete="off" ' +
           'placeholder="https://ユーザー名.github.io/リポジトリ名/" value="' + esc(front) + '" ' +
           'class="min-w-0 flex-1 basis-full rounded border border-slate-300 px-2 py-1.5 text-[11px] sm:basis-auto">' +
+        // 打ち間違い（フォルダ名の付け忘れなど）を防ぐため、いま開いているURLをそのまま入れられるようにする
+        (here ? '<button id="btnFrontHere" class="shrink-0 rounded border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-[11px] font-medium text-indigo-700 hover:bg-indigo-100">いま開いているURLを使う</button>' : '') +
         '<button id="btnFrontSave" class="shrink-0 rounded bg-indigo-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-indigo-700">保存</button>' +
         (front ? '<button id="btnFrontClear" class="shrink-0 rounded border border-slate-300 px-3 py-1.5 text-[11px] text-slate-600 hover:bg-slate-50">GASに戻す</button>' : '') +
       '</div>' +
+      (front ? '<p class="mt-1.5 text-[11px] text-slate-500">配布例: <code class="rounded bg-slate-100 px-1">' +
+        esc(front.replace(/\/+$/, '/') + (front.indexOf('?') >= 0 ? '&' : '?') + 'key=…') + '</code></p>' : '') +
     '</div>';
 
   $('#keyBody').innerHTML = modeCard + frontCard +
@@ -4699,7 +4749,11 @@ const HDR = {
 
   show() {
     if (!this.el) return;
-    if (this.hidden) { this.hidden = false; this.el.classList.remove('hdr-hidden'); }
+    if (this.hidden) {
+      this.hidden = false;
+      this.el.classList.remove('hdr-hidden');
+      document.documentElement.classList.remove('hdr-tucked');
+    }
     this.measure();
   },
 
@@ -4707,6 +4761,7 @@ const HDR = {
     if (!this.el || this.hidden) return;
     this.hidden = true;
     this.el.classList.add('hdr-hidden');
+    document.documentElement.classList.add('hdr-tucked');
   },
 
   /** 隠してはいけない状況か */
@@ -4724,23 +4779,40 @@ const HDR = {
   },
 
   /**
-   * 一定時間なにも操作が無ければ自動で収納する。
-   *   ・スクロールを止めて 3秒 → 収納
-   *   ・上スクロールで出したあと 2秒 操作が無ければ → 収納
-   * 画面最上部にいるときや、モーダル・ドロップダウン・入力中は収納しない。
+   * 自動収納の作法は、マウスがあるかどうかで変える。
+   * -------------------------------------------------------------------------
+   * 【PC（マウスあり）】
+   *   ・スクロール中は方向に関係なく常に表示（読んでいる最中に消えない）
+   *   ・カーソルを画面上端へ寄せると表示（収納中の復帰手段）
+   *   ・カーソルがヘッダーの上にあるあいだは収納しない
+   *   ・上のどれでもない状態が10秒続いたら収納
+   *
+   * 【スマホ・タブレット（タッチ）】
+   *   従来どおり。下スクロールで収納、上スクロールで即復帰。
+   *   指で画面を隠さないよう、PCより短い時間で収納する。
+   *
+   * 共通して、画面最上部・モーダル・ドロップダウン・入力中は収納しない。
    */
-  AUTO_STOP: 3000,     // スクロールを止めてから収納するまで
-  AUTO_AFTER_UP: 2000, // 上スクロールで出したあと収納するまで
+  AUTO_STOP: 3000,     // タッチ: スクロールを止めてから収納するまで
+  AUTO_AFTER_UP: 2000, // タッチ: 上スクロールで出したあと収納するまで
+  PC_IDLE: 10000,      // PC: 何も起きなくなってから収納するまで
+  HOVER_ZONE: 72,      // PC: 収納中、上端からこの範囲にカーソルが入ったら表示
   autoMs: 3000,
   autoTimer: null,
+  isDesktop: false,    // マウスがある環境か（init で判定）
+  overHeader: false,   // カーソルがヘッダー上（または上端の反応域）にあるか
+
+  /** その環境での既定の待ち時間 */
+  idleMs() { return this.isDesktop ? this.PC_IDLE : this.AUTO_STOP; },
 
   armAutoHide(ms) {
-    this.autoMs = ms || this.autoMs;
+    this.autoMs = ms || this.idleMs();
     clearTimeout(this.autoTimer);
     this.autoTimer = setTimeout(() => {
       if (!this.el || this.hidden) return;
-      if ((window.scrollY || 0) <= 100) return;   // 最上部では隠さない
+      if ((window.scrollY || 0) <= 100) return;   // 最上部では隠さない（隙間ができるため）
       if (this.blocked()) { this.armAutoHide(this.autoMs); return; }   // 操作中なら延長
+      if (this.isDesktop && this.overHeader) { this.armAutoHide(this.autoMs); return; }
       this.hide();
     }, this.autoMs);
   },
@@ -4749,23 +4821,60 @@ const HDR = {
     this.ticking = false;
     const y = Math.max(0, window.scrollY || window.pageYOffset || 0);
     const d = y - this.last;
+    this.last = y;
+
+    if (this.isDesktop) {
+      // PCは方向を問わず表示したまま。止まってから10秒数え直す。
+      this.show();
+      this.armAutoHide(this.PC_IDLE);
+      return;
+    }
+
     if (Math.abs(d) < 6) { this.armAutoHide(this.autoMs); return; }   // 微小な揺れは無視
     if (d > 0 && y > 100 && !this.blocked()) {
       this.hide();                               // 下スクロール中は収納
     } else if (d < 0) {
       this.show();                               // 少し上へスワイプしただけで即復帰
       this.armAutoHide(this.AUTO_AFTER_UP);      // 出したあと2秒で自動収納
+      return;
     } else {
       this.armAutoHide(this.AUTO_STOP);
     }
-    this.last = y;
-    if (!this.hidden && this.autoMs !== this.AUTO_AFTER_UP) this.armAutoHide(this.AUTO_STOP);
+    if (!this.hidden) this.armAutoHide(this.AUTO_STOP);
+  },
+
+  /** PC: カーソル位置から「上端に寄せているか」を判定する */
+  onPointerMove(e) {
+    if (!this.isDesktop || !this.el) return;
+    if (e.pointerType && e.pointerType !== 'mouse') return;   // ペン・指は対象外
+    // 収納中は上端の反応域、表示中はヘッダーそのもの（＋少しの余白）を対象にする
+    const zone = this.hidden ? this.HOVER_ZONE : (this.el.offsetHeight + 8);
+    const near = e.clientY <= zone;
+    if (near === this.overHeader) return;        // 状態が変わったときだけ処理する
+    this.overHeader = near;
+    if (near) {
+      this.show();
+      clearTimeout(this.autoTimer);              // 乗せているあいだは収納しない
+    } else {
+      this.armAutoHide(this.PC_IDLE);            // 離れたら数え始める
+    }
   },
 
   init() {
     this.el = $('#stickyTop');
     if (!this.el) return;
     this.last = window.scrollY || 0;
+
+    /* マウスがある環境かを、入力機器の性質で判定する。
+       画面幅で判定すると、タッチ対応のノートPCや、幅の広いタブレットで外れる。 */
+    try {
+      this.isDesktop = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+      const mq = window.matchMedia('(hover: hover) and (pointer: fine)');
+      const onChange = e => { this.isDesktop = e.matches; this.show(); this.armAutoHide(); };
+      if (mq.addEventListener) mq.addEventListener('change', onChange);
+      else if (mq.addListener) mq.addListener(onChange);
+    } catch (e) { this.isDesktop = false; }
+
     this.syncOpBar();
     window.addEventListener('scroll', () => {
       if (this.ticking) return;
@@ -4774,15 +4883,26 @@ const HDR = {
     }, { passive: true });
     window.addEventListener('resize', () => { this.show(); }, { passive: true });
     window.addEventListener('orientationchange', () => setTimeout(() => this.show(), 150));
+
+    // PC: カーソルを上端へ寄せたら表示、離れたら数え始める
+    window.addEventListener('pointermove', e => this.onPointerMove(e), { passive: true });
+    // ウィンドウの外へ出たら、乗せている扱いを解除する
+    document.addEventListener('mouseleave', () => {
+      if (!this.isDesktop || !this.overHeader) return;
+      this.overHeader = false;
+      this.armAutoHide(this.PC_IDLE);
+    }, { passive: true });
+
     // 画面に触れた瞬間に再表示し、触るのをやめてから収納を数え直す
     ['pointerdown', 'touchstart', 'keydown'].forEach(ev => {
       window.addEventListener(ev, () => {
         this.show();                         // 触ったら即座に降ろす
-        this.armAutoHide(this.AUTO_STOP);
+        this.armAutoHide();
       }, { passive: true });
     });
     // ホイールは「触れた」扱いにせず、収納までの時間だけ延ばす
     window.addEventListener('wheel', () => {
+      if (this.isDesktop) { this.show(); this.armAutoHide(this.PC_IDLE); return; }
       if (!this.hidden) this.armAutoHide(this.autoMs);
     }, { passive: true });
   }
@@ -5356,11 +5476,19 @@ function bindEvents() {
       return;
     }
     // キーを配るURLの保存・解除（オーナー限定。サーバー側でも requireOwner_ で弾く）
+    if (e.target.closest('#btnFrontHere')) {
+      const box = $('#frontUrlBox');
+      if (box) { box.value = selfBaseUrl(); box.focus(); }
+      return;
+    }
     if (e.target.closest('#btnFrontSave')) {
       const box = $('#frontUrlBox');
       const v = box ? box.value.trim() : '';
       if (!v) { toast('URLを入力してください', 'warn'); return; }
-      if (!/^https:\/\//i.test(v)) { toast('https で始まるURLを入れてください', 'warn'); return; }
+      // https 必須（例外は手元確認用の localhost のみ。サーバー側も同じ判定）
+      if (!/^https:\/\//i.test(v) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(v)) {
+        toast('https で始まるURLを入れてください', 'warn'); return;
+      }
       busy(true, '設定中…');
       try {
         await api.setFrontendUrl(v);
