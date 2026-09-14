@@ -2553,10 +2553,14 @@ function renderFocusRest() {
     ? '<div class="rounded-xl bg-indigo-600 p-3 text-white shadow-md">' +
         '<p class="mb-1.5 text-[11px] font-bold uppercase tracking-wide opacity-80">実行中</p>' +
         running.map(t => '<div class="flex flex-wrap items-center gap-2 py-0.5">' +
-          '<span class="min-w-0 flex-1 cursor-pointer truncate text-sm font-semibold open-task" data-id="' + esc(t.id) + '">' + esc(t.name) + '</span>' +
-          '<span class="run-timer rounded bg-white/20 px-2 py-0.5 font-mono text-xs" data-start="' + esc(t.logStart || '') + '"></span>' +
-          (t.estMin !== '' ? '<span class="text-[10px] opacity-80">見積 ' + minLabel(t.estMin) + '</span>' : '') +
-          '<button class="focus-act rounded bg-white px-2 py-1 text-[11px] font-bold text-indigo-700" data-id="' + esc(t.id) + '" data-act="Done">完了</button>' +
+          // ⚠️ 名前に flex-1 を付けない。付けると名前が空白ごと横いっぱいに伸び、
+          //    ボタンが画面の右端まで飛んで「どのタスクのボタンか」が分からなくなる。
+          //    伸びるのは末尾の空き（grow）だけにして、操作は名前のすぐ右に並べる。
+          '<span class="min-w-0 max-w-full cursor-pointer truncate text-sm font-semibold open-task" data-id="' + esc(t.id) + '">' + esc(t.name) + '</span>' +
+          '<span class="run-timer shrink-0 rounded bg-white/20 px-2 py-0.5 font-mono text-xs" data-start="' + esc(t.logStart || '') + '"></span>' +
+          (t.estMin !== '' ? '<span class="shrink-0 text-[10px] opacity-80">見積 ' + minLabel(t.estMin) + '</span>' : '') +
+          '<button class="focus-act shrink-0 rounded bg-white px-2 py-1 text-[11px] font-bold text-indigo-700" data-id="' + esc(t.id) + '" data-act="Done">完了</button>' +
+          '<span class="grow"></span>' +
         '</div>').join('') +
       '</div>' : '';
 
@@ -2567,9 +2571,10 @@ function renderFocusRest() {
         '<p class="mb-1.5 text-[11px] font-bold text-amber-800">⏰ 時間指定タスク（開始時刻になりました）</p>' +
         due.map(t => '<div class="flex flex-wrap items-center gap-2 border-t border-amber-200 py-1.5 first:border-0">' +
           '<span class="rounded bg-amber-200 px-1.5 py-0.5 font-mono text-[11px] text-amber-900">' + esc(t.startTime || '') + (t.endTime ? '–' + esc(t.endTime) : '') + '</span>' +
-          '<span class="min-w-0 flex-1 cursor-pointer truncate text-sm font-semibold text-amber-900 open-task" data-id="' + esc(t.id) + '">' + esc(t.name) + '</span>' +
-          '<button class="focus-act rounded bg-indigo-600 px-2 py-1 text-[11px] font-semibold text-white" data-id="' + esc(t.id) + '" data-act="InProgress">着手</button>' +
-          '<button class="focus-act rounded px-2 py-1 text-[11px] font-semibold text-white" style="background:#10B981" data-id="' + esc(t.id) + '" data-act="Done">完了</button>' +
+          '<span class="min-w-0 max-w-full cursor-pointer truncate text-sm font-semibold text-amber-900 open-task" data-id="' + esc(t.id) + '">' + esc(t.name) + '</span>' +
+          '<button class="focus-act shrink-0 rounded bg-indigo-600 px-2 py-1 text-[11px] font-semibold text-white" data-id="' + esc(t.id) + '" data-act="InProgress">着手</button>' +
+          '<button class="focus-act shrink-0 rounded px-2 py-1 text-[11px] font-semibold text-white" style="background:#10B981" data-id="' + esc(t.id) + '" data-act="Done">完了</button>' +
+          '<span class="grow"></span>' +
         '</div>').join('') +
       '</div>' : '';
 
@@ -2581,12 +2586,13 @@ function renderFocusRest() {
         '<summary class="cursor-pointer px-3 py-2 text-xs font-bold text-slate-600">↷ スキップされたタスク（' + skipped.length + '）' +
           '<span class="ml-2 font-normal text-slate-400">日付が変わると自動で候補に戻ります</span></summary>' +
         '<div class="border-t border-slate-100 p-2">' +
-        skipped.sort(byScoreDesc).map(t => '<div class="flex items-center gap-2 border-b border-slate-50 py-1.5 last:border-0">' +
+        skipped.sort(byScoreDesc).map(t => '<div class="flex flex-wrap items-center gap-2 border-b border-slate-50 py-1.5 last:border-0">' +
           '<span class="w-10 shrink-0 text-right text-[10px] font-bold text-slate-400">' + taskScore(t) + '</span>' +
-          '<span class="min-w-0 flex-1 cursor-pointer truncate text-xs open-task" data-id="' + esc(t.id) + '">' +
+          '<span class="min-w-0 max-w-full cursor-pointer truncate text-xs open-task" data-id="' + esc(t.id) + '">' +
             (t.importance === '高' ? '🚩 ' : '') + esc(t.name) + '</span>' +
           '<button class="focus-unskip shrink-0 rounded border border-slate-300 px-2 py-0.5 text-[10px] text-slate-600 hover:bg-slate-50" data-id="' + esc(t.id) + '">↩ 戻す</button>' +
           '<button class="focus-act shrink-0 rounded bg-indigo-600 px-2 py-0.5 text-[10px] font-semibold text-white" data-id="' + esc(t.id) + '" data-act="InProgress">▶ 着手</button>' +
+          '<span class="grow"></span>' +
         '</div>').join('') +
         '</div></details>'
     : '';
@@ -3235,7 +3241,27 @@ function flowProjHits(d) {
       'data-id="' + esc(p.id) + '">' + esc(p.name) + '</button>').join('');
 }
 
+/**
+ * 画面に出ている入力欄の値を、下書きへ取り込む。
+ * -------------------------------------------------------------------------
+ * 高速整理はボタンを押すたびにカード全体を作り直す。
+ * このとき下書きに取り込まれていない入力値（時刻・間隔・日付など）は
+ * 作り直しで消えてしまう。change を待たずに、描き直す前に必ず拾っておく。
+ */
+function syncFlowInputs() {
+  const d = S.flowDraft;
+  if (!d || !d.__id) return;
+  const v = id => { const el = $('#' + id); return el ? el.value : null; };
+  const memo = v('flowMemo');        if (memo !== null) d.memo = memo;
+  const due = v('flowDue');          if (due !== null) d.due = due;
+  const date = v('flowDate');        if (date !== null) d.execDate = date;
+  const st = v('flowStart');         if (st !== null) d.startTime = st;
+  const en = v('flowEnd');           if (en !== null) d.endTime = en;
+  const rn = v('flowRepeatNum');     if (rn !== null) d.repeatNum = rn === '' ? '' : Number(rn);
+}
+
 function renderFlow() {
+  syncFlowInputs();
   const q = flowQueue();
   const total = S.tasks.filter(isUnsorted).length;
   $('#inboxProgress').textContent = q.length
@@ -3254,7 +3280,11 @@ function renderFlow() {
   const t = q[0];
   const d = S.flowDraft = Object.assign({
     gtd: t.gtd || '', project: t.project || '', execDate: t.execDate || '', importance: t.importance || '',
-    location: t.location || '', estMin: t.estMin === '' ? '' : t.estMin, memo: t.memo || ''
+    location: t.location || '', estMin: t.estMin === '' ? '' : t.estMin, memo: t.memo || '',
+    due: t.due || '', asap: t.asap || '',
+    hasTime: !!t.hasTime, startTime: t.startTime || '', endTime: t.endTime || '',
+    repeatRule: t.repeatRule || '', repeatNum: t.repeatNum === '' ? '' : t.repeatNum,
+    repeatDow: t.repeatDow || ''
   }, S.flowDraft && S.flowDraft.__id === t.id ? S.flowDraft : {}, { __id: t.id });
 
   const today = todayStr();
@@ -3287,9 +3317,18 @@ function renderFlow() {
           quickBtn('fl-date', addDays(today, 1), '明日', d.execDate === addDays(today, 1)) +
           quickBtn('fl-date', addDays(today, 7), '来週', d.execDate === addDays(today, 7)) +
           quickBtn('fl-date', '', 'なし', !d.execDate) +
-          '<input id="flowDate" type="date" class="rounded-lg border border-slate-300 px-2 py-1 text-xs" value="' + esc(d.execDate) + '">' +
+          '<input id="flowDate" type="date" class="min-w-0 max-w-[9.5rem] rounded-lg border border-slate-300 px-2 py-1 text-xs" value="' + esc(d.execDate) + '">' +
         '</div></div>' +
       '</div>' +
+
+      // --- 期限 ---
+      '<div class="mt-3"><p class="lbl">期限</p><div class="flex flex-wrap items-center gap-1.5">' +
+        quickBtn('fl-due', d.execDate || today, '実行日と同じ', !!d.due && d.due === (d.execDate || today)) +
+        quickBtn('fl-due', addDays(today, 7), '1週間後', d.due === addDays(today, 7)) +
+        quickBtn('fl-due', addDays(today, 30), '1か月後', d.due === addDays(today, 30)) +
+        quickBtn('fl-due', '', 'なし', !d.due) +
+        '<input id="flowDue" type="date" class="min-w-0 max-w-[9.5rem] rounded-lg border border-slate-300 px-2 py-1 text-xs" value="' + esc(d.due) + '">' +
+      '</div></div>' +
 
       '<div class="mt-3 grid gap-3 sm:grid-cols-3">' +
         '<div><p class="lbl">重要度</p><div class="flex gap-1.5">' +
@@ -3301,6 +3340,47 @@ function renderFlow() {
         '<div><p class="lbl">予想必要時間</p><div class="flex flex-wrap gap-1.5">' +
           [5, 15, 30, 60].map(m => quickBtn('fl-est', String(m), m + '分', String(d.estMin) === String(m))).join('') + '</div></div>' +
       '</div>' +
+
+      // --- 時間指定（カレンダー同期）。オンのときだけ時刻欄を出す ---
+      '<div class="mt-3 rounded-lg bg-slate-50 p-2.5 ring-1 ring-slate-200">' +
+        '<label class="inline-flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">' +
+          '<input id="flowHasTime" type="checkbox" class="rounded border-slate-300"' + (d.hasTime ? ' checked' : '') + '>' +
+          '時間指定あり（カレンダーに登録）</label>' +
+        (d.hasTime ?
+          '<div class="mt-2 flex flex-wrap items-center gap-1.5 text-xs">' +
+            '<input id="flowStart" type="time" class="rounded-lg border border-slate-300 px-2 py-1 text-xs" value="' + esc(d.startTime) + '">' +
+            '<span class="text-slate-400">〜</span>' +
+            '<input id="flowEnd" type="time" class="rounded-lg border border-slate-300 px-2 py-1 text-xs" value="' + esc(d.endTime) + '">' +
+            '<span class="text-[11px] text-slate-400">実行日の時刻として登録されます</span>' +
+          '</div>' : '') +
+      '</div>' +
+
+      // --- 繰り返し。ルールを選んだときだけ間隔・曜日を出す ---
+      '<div class="mt-3 rounded-lg bg-slate-50 p-2.5 ring-1 ring-slate-200">' +
+        '<div class="flex flex-wrap items-center gap-2">' +
+          '<span class="lbl mb-0">繰り返しルール</span>' +
+          '<select id="flowRepeat" class="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-xs sm:max-w-[16rem]">' +
+            (S.options.repeatRule || ['']).map(r =>
+              '<option value="' + esc(r) + '"' + (d.repeatRule === r ? ' selected' : '') + '>' +
+              esc(r || '（なし）') + '</option>').join('') +
+          '</select>' +
+          (RULES_WITH_NUM.indexOf(d.repeatRule) >= 0 ?
+            '<span class="flex items-center gap-1 text-xs text-slate-600">間隔' +
+              '<input id="flowRepeatNum" type="number" min="1" class="w-16 rounded-lg border border-slate-300 px-2 py-1 text-xs" ' +
+                'value="' + esc(d.repeatNum === '' ? '' : d.repeatNum) + '" placeholder="1"></span>' : '') +
+        '</div>' +
+        (RULES_WITH_DOW.indexOf(d.repeatRule) >= 0 ?
+          '<div class="mt-2 flex flex-wrap gap-1.5">' +
+            DOW_NAMES.map(w => quickBtn('fl-dow', w, w,
+              String(d.repeatDow || '').split(/\s*,\s*/).indexOf(w) >= 0)).join('') +
+          '</div>' : '') +
+      '</div>' +
+
+      // --- ASAP ---
+      '<div class="mt-3"><p class="lbl">ASAP</p><div class="flex gap-1.5">' +
+        quickBtn('fl-asap', 'ASAP', '⚡ ASAP', !!d.asap) +
+        quickBtn('fl-asap', '', 'なし', !d.asap) +
+      '</div></div>' +
 
       '<div class="mt-5 flex flex-wrap gap-2">' +
         '<button id="flowNext" class="flex-1 rounded-lg bg-indigo-600 py-3 text-sm font-bold text-white hover:bg-indigo-700">保存して次へ →</button>' +
@@ -3319,9 +3399,18 @@ function flowSave(markDone) {
   const q = flowQueue();
   if (!q.length) return;
   const t = q[0], d = S.flowDraft || {};
+  syncFlowInputs();   // 入力中の値を取りこぼさない
+
   const task = Object.assign({}, t, {
     gtd: d.gtd || t.gtd || '00_INBOX', project: d.project, execDate: d.execDate,
+    due: d.due, asap: d.asap,
     importance: d.importance, location: d.location,
+    hasTime: !!d.hasTime,
+    startTime: d.hasTime ? d.startTime : '',
+    endTime: d.hasTime ? d.endTime : '',
+    repeatRule: d.repeatRule,
+    repeatNum: d.repeatNum === '' ? '' : Number(d.repeatNum),
+    repeatDow: RULES_WITH_DOW.indexOf(d.repeatRule) >= 0 ? d.repeatDow : '',
     estMin: d.estMin === '' ? '' : Number(d.estMin),
     memo: $('#flowMemo') ? $('#flowMemo').value : d.memo,
     status: markDone ? 'Done' : t.status
@@ -5213,6 +5302,18 @@ function bindEvents() {
     const im = e.target.closest('.fl-imp');  if (im) { d.importance = (d.importance === im.dataset.v) ? '' : im.dataset.v; renderFlow(); return; }
     const lo = e.target.closest('.fl-loc');  if (lo) { d.location = (d.location === lo.dataset.v) ? '' : lo.dataset.v; renderFlow(); return; }
     const es = e.target.closest('.fl-est');  if (es) { d.estMin = (String(d.estMin) === es.dataset.v) ? '' : Number(es.dataset.v); renderFlow(); return; }
+    const du = e.target.closest('.fl-due');  if (du) { d.due = du.dataset.v; renderFlow(); return; }
+    const ap = e.target.closest('.fl-asap'); if (ap) { d.asap = ap.dataset.v; renderFlow(); return; }
+    // 曜日は複数選べるので、押すたびに入れ替える
+    const dw = e.target.closest('.fl-dow');
+    if (dw) {
+      const cur = String(d.repeatDow || '').split(/\s*,\s*/).filter(Boolean);
+      const i = cur.indexOf(dw.dataset.v);
+      if (i >= 0) cur.splice(i, 1); else cur.push(dw.dataset.v);
+      // 日〜土の並び順に整えてから保持する
+      d.repeatDow = DOW_NAMES.filter(w => cur.indexOf(w) >= 0).join(',');
+      renderFlow(); return;
+    }
     if (e.target.id === 'flowNext') { flowSave(false); return; }
     if (e.target.id === 'flowDoneNow') { flowSave(true); return; }
     if (e.target.id === 'flowSkip') { const q = flowQueue(); if (q.length) { S.flowDone[q[0].id] = true; S.flowDraft = null; renderFlow(); } return; }
@@ -5254,6 +5355,12 @@ function bindEvents() {
     if (e.target.id === 'flowProject') { d.project = e.target.value; }
     if (e.target.id === 'flowDate') { d.execDate = e.target.value; renderFlow(); }
     if (e.target.id === 'flowMemo') { d.memo = e.target.value; }
+    if (e.target.id === 'flowDue') { d.due = e.target.value; renderFlow(); }
+    if (e.target.id === 'flowHasTime') { d.hasTime = e.target.checked; renderFlow(); }
+    if (e.target.id === 'flowStart') { d.startTime = e.target.value; }
+    if (e.target.id === 'flowEnd') { d.endTime = e.target.value; }
+    if (e.target.id === 'flowRepeat') { d.repeatRule = e.target.value; renderFlow(); }
+    if (e.target.id === 'flowRepeatNum') { d.repeatNum = e.target.value === '' ? '' : Number(e.target.value); }
   });
   $('#inboxFlow').addEventListener('keydown', e => {
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
