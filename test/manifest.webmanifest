@@ -1,0 +1,26 @@
+{
+  "name": "タスク管理 / GTD",
+  "short_name": "タスク",
+  "description": "GTDタスク管理（ホーム画面から開けるアプリ版）",
+  "start_url": "./index.html?src=app",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#37352f",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "INBOXに入れる", "short_name": "INBOX", "url": "./quick.html?src=shortcut",
+      "icons": [{ "src": "icon-add-96.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "フォーカス", "url": "./index.html?view=focus" },
+    { "name": "今日の計画", "url": "./index.html?view=plan" }
+  ],
+  "share_target": {
+    "action": "./quick.html",
+    "method": "GET",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  }
+}
