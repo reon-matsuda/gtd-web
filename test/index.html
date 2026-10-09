@@ -1628,7 +1628,7 @@ function localSave(task) {
  *   大きすぎる本文は黙って消える。applyBatch は MAX_POST_BYTES ごとに分割する。
  */
 const RPC_TIMEOUT = 30000;
-const RPC_RETRY = 2;
+const RPC_RETRY = 2; /* 時間のかかる処理の待ち時間（初回の起動は列の追加・移行があるので長め。AI は返答に数十秒かかる） */ const SLOW_RPC = { getBootstrap: 90000, buildContactPdfs: 120000, buildSharePdf: 120000, aiYearForecast: 300000, dedupeRecurringChains: 90000 };
 
 /**
  * 1回のPOSTに載せる操作の最大件数。
@@ -1788,7 +1788,7 @@ const api = new Proxy({}, {
   get: (_, fn) => (...args) => {
     const method = String(fn);
     if (method === 'applyBatch') return applyBatchChunked(args[0]);
-    return rpcCall(method, args);
+    return rpcCall(method, args, SLOW_RPC[method] || (/^ai/.test(method) ? 150000 : undefined));   // 時間のかかる処理は待ち時間を延ばす
   }
 });
 
