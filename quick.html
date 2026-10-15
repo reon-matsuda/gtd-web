@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#37352f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>INBOXに入れる</title>
+<script src="config.js"></script>
+<style>
+  /* アプリ本体を読み込まずに一瞬で開くための、単独の小さな画面 */
+  :root { --ink:#37352f; --muted:#91918e; --line:#e9e9e7; --bg:#ffffff; --soft:#f7f7f5; --ok:#0f7b6c; --bad:#e03e3e; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--ink);
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  main { max-width:560px; margin:0 auto; padding:calc(16px + env(safe-area-inset-top)) 16px 24px; }
+  h1 { font-size:15px; margin:0 0 10px; display:flex; align-items:center; gap:8px; }
+  h1 a { margin-left:auto; font-size:12px; color:var(--muted); text-decoration:none; }
+  textarea { width:100%; min-height:120px; font-size:18px; line-height:1.5; padding:12px; border:1px solid var(--line);
+    border-radius:8px; background:var(--soft); color:var(--ink); resize:vertical; }
+  textarea:focus { outline:2px solid var(--ink); background:#fff; }
+  .row { display:flex; gap:8px; margin-top:10px; }
+  button { font:inherit; border-radius:8px; border:1px solid var(--line); background:#fff; color:var(--ink); padding:14px 16px; font-size:15px; }
+  #go { flex:1; background:var(--ink); color:#fff; border-color:var(--ink); font-weight:700; }
+  #go:disabled { opacity:.5; }
+  #mic.on { background:var(--bad); color:#fff; border-color:var(--bad); }
+  #msg { margin-top:12px; font-size:13px; min-height:1.4em; }
+  #msg.ok { color:var(--ok); } #msg.bad { color:var(--bad); }
+  .hist { margin-top:16px; border-top:1px solid var(--line); padding-top:10px; font-size:13px; color:var(--muted); }
+  .hist p { margin:4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>📥 INBOXに入れる <a href="index.html">アプリを開く ›</a></h1>
+  <textarea id="t" placeholder="思いついたことをそのまま（1行目がタスク名・2行目以降はメモ）" autofocus></textarea>
+  <div class="row">
+    <button id="mic" type="button" title="音声で入力">🎤</button>
+    <button id="go" type="button">INBOXに入れる</button>
+  </div>
+  <p id="msg"></p>
+  <div class="hist" id="hist"></div>
+</main>
+<script>
+/*
+ * 1行目をタスク名、2行目以降をメモとして quickAdd を呼ぶ。
+ * アクセスキーはアプリ本体と同じ保存場所（この端末の localStorage）から読む。
+ * 送れなかった分は端末にためておき、次に開いたときに自動で送り直す。
+ */
+var cfg = window.GTD_CONFIG || {};
+// テスト環境（config.js に storagePrefix）では保存名を分ける。アプリ本体と同じ規則
+var PFX = /^[A-Za-z0-9_-]{1,20}$/.test(String(cfg.storagePrefix || '')) ? String(cfg.storagePrefix) : '';
+var KEY_NAME = PFX + 'gtdAuthKey', PENDING = PFX + 'gtdQuickPending';
+function key() {
+  try { var k = localStorage.getItem(KEY_NAME); if (k) return k; } catch (e) {}
+  var m = document.cookie.match(new RegExp('(?:^|; )' + KEY_NAME + '=([^;]*)'));
+  return m ? decodeURIComponent(m[1]) : '';
+}
+function say(text, cls) { var el = document.getElementById('msg'); el.textContent = text; el.className = cls || ''; }
+function nonce() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
+function pending() { try { return JSON.parse(localStorage.getItem(PENDING) || '[]'); } catch (e) { return []; } }
+function setPending(a) { try { localStorage.setItem(PENDING, JSON.stringify(a)); } catch (e) {} }
+
+function send(item) {
+  var n = nonce();
+  return fetch(cfg.apiUrl, {
+    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, cache: 'no-store',
+    body: JSON.stringify({ method: 'quickAdd', args: [item.name, item.memo || '', item.cid || ''], auth: key(), n: n })
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    if (!j || !j.ok || j.m !== 'quickAdd') throw new Error((j && j.error) || '送信できませんでした');
+    return j.result;
+  });
+}
+function addHist(name) {
+  var h = document.getElementById('hist');
+  var p = document.createElement('p'); p.textContent = '✓ ' + name;
+  h.insertBefore(p, h.firstChild);
+}
+function flushPending() {
+  var list = pending();
+  if (!list.length) return;
+  var rest = [];
+  (function next(i) {
+    if (i >= list.length) { setPending(rest); if (!rest.length) say('前回送れなかった ' + list.length + '件を送りました', 'ok'); return; }
+    send(list[i]).then(function () { addHist(list[i].name); next(i + 1); })
+                 .catch(function () { rest.push(list[i]); next(i + 1); });
+  })(0);
+}
+function submit() {
+  var raw = document.getElementById('t').value.trim();
+  if (!raw) { say('内容が空です', 'bad'); return; }
+  if (!key()) { say('この端末にアクセスキーがありません。先にアプリ本体をキー付きURLで1回開いてください。', 'bad'); return; }
+  var lines = raw.split('\n');
+  // cid … 1件ごとの使い捨ての番号。送り直してもサーバーが「同じもの」と分かり、2件にならない
+  var item = { name: lines[0].trim(), memo: lines.slice(1).join('\n').trim(), cid: 'q_' + nonce() + nonce() };
+  var btn = document.getElementById('go'); btn.disabled = true; say('送信中…');
+  send(item).then(function () {
+    addHist(item.name); document.getElementById('t').value = ''; say('INBOXに入れました ✓', 'ok');
+  }).catch(function (e) {
+    var p = pending(); p.push(item); setPending(p);
+    say('いまは送れませんでした（端末に保存し、次に開いたとき送ります）: ' + e.message, 'bad');
+  }).then(function () { btn.disabled = false; document.getElementById('t').focus(); });
+}
+document.getElementById('go').onclick = submit;
+document.getElementById('t').addEventListener('keydown', function (e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') submit(); });
+
+// 他のアプリから「共有」されたときは、その内容を入れておく
+(function () {
+  var q = new URLSearchParams(location.search);
+  var parts = [q.get('title'), q.get('text'), q.get('url')].filter(Boolean);
+  if (parts.length) document.getElementById('t').value = parts.join('\n');
+})();
+
+// 🎤 音声入力（Chrome の音声認識。使えない端末ではキーボードのマイクを使う）
+(function () {
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var btn = document.getElementById('mic');
+  if (!SR) { btn.onclick = function () { say('この端末では、キーボードのマイクボタンで音声入力してください'); document.getElementById('t').focus(); }; return; }
+  var rec = null;
+  btn.onclick = function () {
+    if (rec) { rec.stop(); return; }
+    rec = new SR(); rec.lang = 'ja-JP'; rec.interimResults = true; rec.continuous = false;
+    var base = document.getElementById('t').value;
+    rec.onresult = function (e) {
+      var s = ''; for (var i = 0; i < e.results.length; i++) s += e.results[i][0].transcript;
+      document.getElementById('t').value = (base ? base + '\n' : '') + s;
+    };
+    rec.onend = function () { rec = null; btn.className = ''; };
+    rec.onerror = function (e) { say('音声入力できませんでした: ' + e.error, 'bad'); };
+    btn.className = 'on'; rec.start();
+  };
+})();
+
+if (!cfg.apiUrl) say('config.js の apiUrl が未設定です', 'bad');
+flushPending();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+</script>
+</body>
+</html>
