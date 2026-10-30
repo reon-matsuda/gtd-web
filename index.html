@@ -98,6 +98,22 @@
        html.no-tw の中だけに閉じているので、通常時の hidden sm:inline などには影響しない。 */
     html.no-tw .hidden{ display:none !important; }
     /* ---- 入力欄の右端の × （押すと空欄に戻す）---- */
+    /* スマホで横スクロールさせない（はみ出しはその要素の中で処理する）2026-10 */
+    html, body{ max-width:100%; overflow-x:clip; }
+    /* スマホ縦画面：テーブルを1件ずつのカードとして縦に積む（横スクロール不要） */
+    @media (max-width: 639px){
+      .ttable{ min-width:0 !important; }
+      .ttable thead{ display:none; }
+      .ttable tbody tr{ display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 10px; padding:10px 12px; }
+      .ttable tbody td{ display:block; padding:0 !important; font-size:12px; }
+      .ttable td.td-name{ order:-2; flex-basis:100%; font-size:14px; font-weight:600; }
+      .ttable td.row-acts{ order:9; flex-basis:100%; margin-top:6px; }
+      .ttable td.td-empty{ display:none; }
+      .ttable td[data-label]:not(.td-name)::before{ content:attr(data-label) " "; color:#94a3b8; font-size:10px; }
+    }
+    /* ポモドーロ：画面右下に浮かぶタイマー（作業＝赤、休憩＝緑） */
+    #pomoFloat{ position:fixed; right:12px; bottom:84px; z-index:45; }
+    @media (min-width: 640px){ #pomoFloat{ bottom:20px; } }
     /* 項目の設定（📝 項目）で隠した・ロックした欄 */
     .fp-hidden{ display:none !important; }
     .fp-locked{ opacity:.6; }
@@ -339,10 +355,11 @@
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="gantt">ガントチャート</button>
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="memo">プロジェクトメモ</button>
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="inbox">📥 Inbox整理<span id="inboxCount" class="ml-1 rounded-full bg-rose-500 px-1.5 text-[10px] text-white"></span></button>
-      <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="projects">📁 プロジェクト一覧</button>
+      <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="projects">📁 フォルダ</button>
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="all">全タスク検索</button>
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="notes">🗒 メモ</button>
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="rules">🧭 マイルール</button>
+      <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="habits">🌱 習慣</button>
       <button id="btnCfg" title="表示設定" class="ml-auto shrink-0 rounded-md px-2.5 py-1.5 text-slate-500 hover:bg-white">⚙️</button>
     </nav>
   </div>
@@ -371,6 +388,12 @@
     <div id="notesBody"></div>
   </section>
 
+  <!-- ===================== 🌱 習慣（マイルーティンのような毎日の習慣） ===================== -->
+  <section id="view-habits" class="view hidden">
+    <div id="habitsTools" class="op-bar"></div>
+    <div id="habitsBody"></div>
+  </section>
+
   <!-- ===================== 🧭 マイルール・考え方 ===================== -->
   <section id="view-rules" class="view hidden"><div id="rulesBody"></div></section>
 
@@ -378,8 +401,8 @@
   <section id="view-focus" class="view hidden">
     <div id="focusSliceBar" class="op-bar"></div>
     <!-- ポモドーロ（動いているときだけ出る）・いまいる場所 -->
-    <div id="pomoBar" class="mb-3" hidden></div>
     <div id="placeBar" class="mb-3" hidden></div>
+    <div id="focusWaitAsk"></div>
     <!-- 順序1：最優先タスク（デスク / どこでも） -->
     <div class="grid gap-3 lg:grid-cols-2">
       <div>
@@ -591,18 +614,21 @@
            するとチェックボックスにフォーカスが移った瞬間、ブラウザが枠ごとスクロールして
            上部の「タスクを編集／削除」が画面外へ消える（戻すスクロールバーも無い）。 -->
       <div class="relative min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+        <!-- まず「タスク」か「メモ」かを選ぶ（メモ＝Areas / Resources。メモに要る欄だけになる） -->
+        <div id="mKind" class="flex gap-1.5">
+          <button type="button" class="m-kind flex-1 rounded-lg border px-3 py-2 text-sm" data-k="task">✅ タスク</button>
+          <button type="button" class="m-kind flex-1 rounded-lg border px-3 py-2 text-sm" data-k="memo">📝 メモ</button>
+        </div>
         <div>
           <label class="lbl">タスク名 <span class="text-rose-500">*</span></label>
           <input id="mName" class="inp" placeholder="やることを一言で">
         </div>
         <!-- 既存タスクだけに出す操作（AI・根回し・復習・ポモドーロ） -->
         <div id="mActions" class="flex flex-wrap gap-1.5" hidden>
-          <button type="button" class="m-act rounded-lg border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-50" data-act="ai" title="担当AIの保留箱に入れ、週1回まとめて回答をもらう">🤖 AIに任せる</button>
           <button type="button" class="m-act rounded-lg border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-50" data-act="ainow" title="急ぎのときは今すぐ回答をもらう（その場で料金がかかる）">⚡ 今すぐ回答</button>
           <button type="button" id="mBreakdown" class="m-act rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs text-amber-800 hover:bg-amber-100" data-act="breakdown" title="担当AIが実行できる大きさに分け、INBOXに入れます" hidden>🧩 AIで細分化</button>
           <button type="button" class="m-act rounded-lg border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-50" data-act="nemawashi" title="事前に周りへ伝えておく連絡タスクを作る">🤝 根回し</button>
           <button type="button" class="m-act rounded-lg border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-50" data-act="review" title="忘却曲線に沿って復習タスクを作る">📚 復習</button>
-          <button type="button" class="m-act rounded-lg border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-50" data-act="pomo" title="ポモドーロタイマーを始める">🍅 ポモドーロ</button>
         </div>
         <div>
           <label class="lbl">メモ</label>
@@ -611,23 +637,23 @@
         <!-- 同じプロジェクトの Areas / Resources のメモ（作業前に目を通すべきもの） -->
         <div id="mRefMemos" hidden></div>
         <p id="mAreaNote" class="rounded-lg bg-sky-50 px-3 py-2 text-[11px] leading-relaxed text-sky-800" hidden>
-          Areas / Resources は「実行するタスク」ではなく置き場なので、
-          プロジェクト・実行日・期限・重要度（とメモ・添付）だけを表示しています。
-          期限を過ぎたものは自動で Done になります。</p>
+          メモ（Areas / Resources）は「実行するタスク」ではなく置き場なので、
+          プロジェクト・実行日・絶対期限・重要度（とメモ・添付）だけを表示しています。
+          絶対期限を過ぎたものは自動で Done になります。</p>
         <div class="grid grid-cols-2 gap-3">
           <div><label class="lbl">ステータス</label><select id="mStatus" class="inp"></select></div>
           <div><label class="lbl">GTD種別 <button class="ml-1 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600 hover:bg-slate-200 inline-add" data-kind="gtd">＋新規</button></label><select id="mGtd" class="inp"></select></div>
-          <div><label class="lbl">プロジェクト <button class="ml-1 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600 hover:bg-slate-200 inline-add" data-kind="project">＋新規</button></label>
-            <input id="mProjSearch" type="text" class="inp mb-1" autocomplete="off" placeholder="プロジェクト名で検索（スペースで絞り込み）">
+          <div><label class="lbl">📁 フォルダ <button class="ml-1 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600 hover:bg-slate-200 inline-add" data-kind="project">＋新規</button></label>
+            <input id="mProjSearch" type="text" class="inp mb-1" autocomplete="off" placeholder="フォルダ名で検索（上の階層の名前でも・スペースで絞り込み）">
             <div id="mProjHits" class="mb-1 hidden max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-white"></div>
             <div class="clr-wrap"><select id="mProject" class="inp"></select><button type="button" class="clr" data-clear="mProject" title="空欄にする" aria-label="空欄にする">×</button></div></div>
           <div><label class="lbl">重要度</label><div class="clr-wrap"><select id="mImportance" class="inp"><option value="">未設定</option><option value="高">高</option><option value="低">低</option></select><button type="button" class="clr" data-clear="mImportance" title="空欄にする" aria-label="空欄にする">×</button></div></div>
           <div><label class="lbl">実行日</label><div class="clr-wrap"><input id="mExec" type="date" class="inp"><button type="button" class="clr" data-clear="mExec" title="空欄にする" aria-label="空欄にする">×</button></div>
             <p id="mCapWarn" class="mt-1 text-[11px] text-rose-600" hidden></p></div>
-          <div><label class="lbl">目標期限</label><div class="clr-wrap"><input id="mDue" type="date" class="inp"><button type="button" class="clr" data-clear="mDue" title="空欄にする" aria-label="空欄にする">×</button></div></div>
+          <div id="mDueBox" data-ar="1"><label class="lbl">目標期限</label><div class="clr-wrap"><input id="mDue" type="date" class="inp"><button type="button" class="clr" data-clear="mDue" title="空欄にする" aria-label="空欄にする">×</button></div></div>
           <div><label class="lbl">絶対期限 <span class="text-[10px] font-normal text-slate-400">（動かせない締切）</span></label>
             <div class="clr-wrap"><input id="mHardDue" type="date" class="inp"><button type="button" class="clr" data-clear="mHardDue" title="空欄にする" aria-label="空欄にする">×</button></div></div>
-          <div data-ar="1"><label class="lbl">担当者 <button class="ml-1 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600 hover:bg-slate-200 inline-add" data-kind="assignee">＋新規</button></label>
+          <div id="mAssigneeBox" data-ar="1"><label class="lbl">担当者 <button type="button" class="as-all ml-1 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600 hover:bg-slate-200">▾ 一覧</button> <button class="ml-1 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600 hover:bg-slate-200 inline-add" data-kind="assignee">＋新規</button></label>
             <div class="clr-wrap"><input id="mAssignee" class="inp" autocomplete="off" placeholder="名前・メールで検索（スペースで絞り込み）"><button type="button" class="clr" data-clear="mAssignee" title="空欄にする" aria-label="空欄にする">×</button></div>
             <div id="mAssigneeHits" class="mt-1 hidden max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-white"></div>
             <datalist id="assigneeList"></datalist></div>
@@ -646,7 +672,7 @@
         </div>
         <p id="mSnoozeInfo" class="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-500" hidden></p>
         <p id="mActual" data-ar="1" class="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-500"></p>
-        <div data-ar="1">
+        <div data-ar="1" class="hidden"><!-- 分類は 2026-10-29 に廃止（フォルダに一本化）。値はシートに残す -->
           <label class="lbl">分類（複数選択可） <button class="ml-1 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600 hover:bg-slate-200 inline-add" data-kind="category">＋新規</button></label>
           <div id="mCategories" class="flex flex-wrap gap-1.5"></div>
         </div>
@@ -722,7 +748,10 @@
     <div class="mb-3 flex items-center"><h3 id="pTitle" class="text-sm font-bold">プロジェクト設定</h3>
       <button class="ml-auto rounded-md px-2 py-1 text-slate-400 hover:bg-slate-100" data-pclose="1">✕</button></div>
     <div class="space-y-3">
-      <div><label class="lbl">プロジェクト名</label><input id="pName" class="inp"></div>
+      <div><label class="lbl">フォルダ名</label><input id="pName" class="inp"></div>
+      <div><label class="lbl" for="pParent">📁 入れる場所（親フォルダ）</label>
+        <select id="pParent" class="inp"></select>
+        <p class="mt-1 text-[11px] text-slate-400">フォルダの中にフォルダを何段でも入れられます。親フォルダの参加者は、この中も見られます。</p></div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="lbl">開始日</label><input id="pStart" type="date" class="inp"></div>
         <div><label class="lbl">終了日</label><input id="pEnd" type="date" class="inp"></div>
@@ -737,9 +766,9 @@
           ＋ 目標・期限を追加</button>
         <p class="mt-1 text-[11px] text-slate-400">期限日を入れるとガントに赤い縦線、目標はテキストラベルで表示されます。</p>
       </div>
-      <div><label class="lbl">分類</label><div id="pCategories" class="flex flex-wrap gap-1.5"></div></div>
-      <!-- 3階層分類。マスタは持たず、既に使われている値を候補（datalist）に出す -->
-      <div class="grid gap-3 sm:grid-cols-3">
+      <div hidden><label class="lbl">分類</label><div id="pCategories" class="flex flex-wrap gap-1.5"></div></div>
+      <!-- 旧：3階層分類（2026-10-29 フォルダに置き換え。列はシートに残してある） -->
+      <div class="hidden">
         <div><label class="lbl">大分類（該当組織）</label>
           <input id="pMajor" class="inp" list="axMajorList" placeholder="例）人材ハイスクール"><datalist id="axMajorList"></datalist></div>
         <div><label class="lbl">中分類（何関係か）</label>
@@ -747,7 +776,6 @@
         <div><label class="lbl">小分類（細かい内容）</label>
           <input id="pMinor" class="inp" list="axMinorList" placeholder="例）R8_補助金当初計画"><datalist id="axMinorList"></datalist></div>
       </div>
-      <p class="-mt-1 text-[11px] text-slate-400">この3つは絞り込み（ガント・一覧・カンバン）に使えます。既に使った言葉は候補に出ます。</p>
       <label class="flex items-start gap-2 rounded-lg bg-slate-50 p-2 text-xs text-slate-700">
         <input id="pAi" type="checkbox" class="mt-0.5 rounded border-slate-300" checked>
         <span>🤖 担当AIにこのプロジェクトのタスクを渡す
@@ -762,7 +790,7 @@
       <button id="btnPSave" class="flex-1 rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">保存</button>
     </div>
     <button id="btnPDelete" class="mt-2 w-full rounded-lg border border-rose-200 py-2 text-xs text-rose-600 hover:bg-rose-50">
-      このプロジェクトを削除</button>
+      このフォルダを削除</button>
   </div>
 </div>
 
@@ -777,7 +805,7 @@
         <button class="ml-auto rounded-md px-2 py-1 text-slate-400 hover:bg-slate-100" data-cclose="1">✕</button>
       </div>
       <div class="mt-2 flex gap-1 overflow-x-auto rounded-lg bg-slate-100 p-1 text-xs">
-        <button class="cfgtab shrink-0 rounded-md px-3 py-1.5 font-medium" data-cfg="sort">🔢 配点</button>
+        <button class="cfgtab shrink-0 rounded-md px-3 py-1.5 font-medium" data-cfg="sort">🔢 並び順</button>
         <button class="cfgtab shrink-0 rounded-md px-3 py-1.5 font-medium" data-cfg="slices">🔖 Slice</button>
         <button class="cfgtab shrink-0 rounded-md px-3 py-1.5 font-medium" data-cfg="sorts">↕ 並び順</button>
         <button class="cfgtab shrink-0 rounded-md px-3 py-1.5 font-medium" data-cfg="columns">📋 表示列</button>
@@ -888,6 +916,38 @@
     <div class="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-300"></div>
     <div id="moreBody" class="space-y-1"></div>
     <button data-more-close="1" class="mt-2 w-full rounded-lg border border-slate-300 py-2.5 text-sm text-slate-600">閉じる</button>
+  </div>
+</div>
+
+<!-- ===================== 🌱 習慣の編集 ===================== -->
+<div id="hbModal" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-slate-900/40" data-hb-close="1"></div>
+  <div class="absolute inset-x-0 bottom-0 top-16 mx-auto max-w-lg overflow-y-auto rounded-t-2xl bg-white p-4 shadow-2xl sm:inset-y-16 sm:rounded-2xl">
+    <div class="mb-3 flex items-center gap-2"><h2 id="hbTitle" class="text-base font-bold">🌱 習慣</h2>
+      <button class="ml-auto rounded-md px-2 py-1 text-slate-400 hover:bg-slate-100" data-hb-close="1">✕</button></div>
+    <div class="space-y-3">
+      <div><label class="lbl" for="hbName">名前</label><input id="hbName" class="inp" placeholder="例）朝の散歩"></div>
+      <div id="hbTemplates" class="flex flex-wrap gap-1.5"></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="lbl" for="hbSlot">時間帯</label><select id="hbSlot" class="inp"></select></div>
+        <div><label class="lbl" for="hbGoal">目標（分）<span class="text-[10px] font-normal text-slate-400"> タイマー用・空欄可</span></label><input id="hbGoal" type="number" min="0" max="600" step="5" class="inp"></div>
+      </div>
+      <div><label class="lbl">やる日</label>
+        <div class="flex flex-wrap items-center gap-1.5" id="hbDow"></div>
+        <div class="mt-2 flex items-center gap-2 text-xs text-slate-600"><span>または 週に</span>
+          <select id="hbPerWeek" class="rounded border border-slate-300 px-2 py-1 text-xs"><option value="0">—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select>
+          <span>回（曜日を決めず、週の回数だけ決める）</span></div></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="lbl" for="hbRestFrom">お休み（から）</label><input id="hbRestFrom" type="date" class="inp"></div>
+        <div><label class="lbl" for="hbRestTo">お休み（まで）</label><input id="hbRestTo" type="date" class="inp"></div>
+      </div>
+      <p class="-mt-1 text-[11px] text-slate-400">旅行・体調などで休む期間。この間は「やる日」に数えないので、連続日数が途切れません。</p>
+      <div><label class="lbl" for="hbMemo">メモ</label><textarea id="hbMemo" rows="2" class="inp" placeholder="なぜ続けたいか・やり方など"></textarea></div>
+      <div class="flex gap-2 pt-1">
+        <button id="hbSave" class="flex-1 rounded-lg bg-slate-900 py-2.5 text-sm font-semibold text-white">保存</button>
+        <button id="hbArchive" class="rounded-lg border border-slate-300 px-3 py-2.5 text-xs text-slate-600">しまう（やめる）</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1566,8 +1626,9 @@ function openMoreSheet() {
     item('🔔', 'お知らせ' + (unreadNotices() ? '（未読 ' + unreadNotices() + '）' : ''), 'data-act="bell"', 'AIの提案など') +
     item('📊', 'ガントチャート', 'data-go="gantt"', '') +
     item('🗒', 'メモ', 'data-go="notes"', 'Areas / Resources を読む') +
+    item('🌱', '習慣', 'data-go="habits"', '毎日の習慣・連続日数・タイマー') +
     item('🧭', 'マイルール・考え方', 'data-go="rules"', '') +
-    item('📁', 'プロジェクト一覧', 'data-go="projects"', '進捗・目標・期限の管理') +
+    item('📁', 'フォルダ', 'data-go="projects"', 'フォルダの中にフォルダ・進捗・目標') +
     item('📝', 'プロジェクトメモ', 'data-go="memo"', 'Areas / Resources とメモ') +
     item('🔍', '全タスク検索', 'data-go="all"', '条件を組み合わせて探す') +
     '<div class="my-1 border-t border-slate-100"></div>' +
@@ -1628,7 +1689,7 @@ function localSave(task) {
  *   大きすぎる本文は黙って消える。applyBatch は MAX_POST_BYTES ごとに分割する。
  */
 const RPC_TIMEOUT = 30000;
-const RPC_RETRY = 2; /* 時間のかかる処理の待ち時間（初回の起動は列の追加・移行があるので長め。AI は返答に数十秒かかる） */ const SLOW_RPC = { getBootstrap: 90000, buildContactPdfs: 120000, buildSharePdf: 120000, aiYearForecast: 300000, dedupeRecurringChains: 90000 };
+const RPC_RETRY = 2; /* 時間のかかる処理の待ち時間（初回の起動は列の追加・移行があるので長め。AI は返答に数十秒かかる） */ const SLOW_RPC = { getBootstrap: 90000, buildContactPdfs: 120000, buildSharePdf: 120000, aiYearForecast: 300000, dedupeRecurringChains: 90000, getRecurringChain: 90000, runRecurringRescue: 120000, getMemoArchive: 60000, archiveMemos: 90000, restoreMemos: 90000 };
 
 /**
  * 1回のPOSTに載せる操作の最大件数。
@@ -1930,7 +1991,7 @@ function effExec(t) {
 }
 const isProvisional = t => !t.execDate && !t.due && !t.hardDue && !isAreaLike(t.gtd);
 /** その日だけのメモ：Areas / Resources に実行日か期限が付いているもの */
-const isDayMemo = t => isAreaLike(t.gtd) && !!(t.execDate || t.due);
+const isDayMemo = t => isAreaLike(t.gtd) && !!(t.execDate || t.due || t.hardDue);
 
 /* ---- 1日のキャパシティ ---- */
 function capacityCfg() {
@@ -1975,12 +2036,13 @@ const COND_FIELDS = [
   { f: 'status',     label: 'ステータス',     type: 'enum',   opts: () => S.options.status || [] },
   { f: 'gtd',        label: 'GTD種別',        type: 'enum',   opts: () => S.options.gtd || [], short: g => gtdShort(g) },   // gtdShort は後で定義されるので関数で包む
   { f: 'importance', label: '重要度',         type: 'enum',   opts: () => ['高', '低'] },
-  { f: 'project',    label: 'プロジェクト',   type: 'enum',   opts: () => S.projects.map(p => p.id), label2: v => (S.projMap[v] || {}).name || v },
-  { f: 'related',    label: '関連プロジェクト', type: 'multi', opts: () => S.projects.map(p => p.id), label2: v => (S.projMap[v] || {}).name || v },
-  { f: 'pmajor',     label: '大分類',         type: 'enum',   opts: () => axisValues('major') },
-  { f: 'pmiddle',    label: '中分類',         type: 'enum',   opts: () => axisValues('middle') },
-  { f: 'pminor',     label: '小分類',         type: 'enum',   opts: () => axisValues('minor') },
-  { f: 'category',   label: '分類',           type: 'multi',  opts: () => S.categories.map(c => c.id), label2: v => S.catMap[v] || v },
+  { f: 'folder',     label: 'フォルダ（中のフォルダも含む）', type: 'enum', opts: () => folderTreeList().map(x => x.p.id), label2: v => folderPathStr(v) || v },
+  { f: 'project',    label: 'フォルダ（そのフォルダだけ）',   type: 'enum',   opts: () => S.projects.map(p => p.id), label2: v => folderPathStr(v) || (S.projMap[v] || {}).name || v },
+  { f: 'related',    label: '関連フォルダ', type: 'multi', opts: () => S.projects.map(p => p.id), label2: v => folderPathStr(v) || v },
+  { f: 'pmajor',     label: '大分類（旧）', legacy: true,         type: 'enum',   opts: () => axisValues('major') },
+  { f: 'pmiddle',    label: '中分類（旧）', legacy: true,         type: 'enum',   opts: () => axisValues('middle') },
+  { f: 'pminor',     label: '小分類（旧）', legacy: true,         type: 'enum',   opts: () => axisValues('minor') },
+  { f: 'category',   label: '分類（旧）', legacy: true,           type: 'multi',  opts: () => S.categories.map(c => c.id), label2: v => S.catMap[v] || v },
   { f: 'assignee',   label: '担当者',         type: 'enum',   opts: () => assigneeCandidates() },
   { f: 'location',   label: '場所指定',       type: 'enum',   opts: () => S.options.location || [] },
   { f: 'place',      label: '特定の場所',     type: 'enum',   opts: () => placesList().map(x => x.id), label2: v => (placesList().find(x => x.id === v) || {}).name || v },
@@ -1999,7 +2061,10 @@ const COND_FIELDS = [
   { f: 'estMin',     label: '予想必要時間（分）', type: 'num' },
   { f: 'aiFlag',     label: 'AIフラグ',       type: 'enum',   opts: () => ['queued', 'suggested'] },
   { f: 'dayMemo',    label: 'その日だけのメモ', type: 'bool' },
-  { f: 'provisional',label: '日付なし（仮期限で並べる）', type: 'bool' }
+  { f: 'provisional',label: '日付なし（仮期限で並べる）', type: 'bool' },
+  { f: 'timeReached',label: '時間指定の時刻が来た', type: 'bool' },
+  { f: 'overdue',    label: '期限超過（目標・絶対のどちらか）', type: 'bool' },
+  { f: 'hasClock',   label: '開始・終了時刻が決まっている', type: 'bool' }
 ];
 const COND_OPS = {
   enum:  [['in', 'のどれか'], ['nin', 'のどれでもない'], ['empty', 'が空'], ['nempty', 'が空でない']],
@@ -2012,6 +2077,13 @@ const COND_OPS = {
 };
 const condField = f => COND_FIELDS.find(x => x.f === f);
 
+/** 'today+3' → 「今日+3日」のような読みやすい表記 */
+function relDateLabel(v) {
+  const s = String(v || '');
+  if (s === 'today') return '今日';
+  const m = s.match(/^today\s*([+-])\s*(\d+)$/);
+  return m ? '今日' + m[1] + m[2] + '日' : s;
+}
 /** 'today+3' などを日付文字列にする */
 function resolveDateValue(v) {
   const s = String(v || '').trim();
@@ -2025,6 +2097,7 @@ function resolveDateValue(v) {
 function condValue(t, f) {
   switch (f) {
     case 'related':  return t.relatedProjects || [];
+    case 'folder':   return t.project || '';
     case 'category': return t.categories || [];
     case 'pmajor':   return taskAxes(t).major;
     case 'pmiddle':  return taskAxes(t).middle;
@@ -2037,6 +2110,9 @@ function condValue(t, f) {
     case 'keepOverdue': return !!t.keepOverdue;
     case 'dayMemo':  return isDayMemo(t);
     case 'provisional': return isProvisional(t);
+    case 'timeReached': return timeReached(t);
+    case 'overdue':  return isOverdue(t);
+    case 'hasClock': return !!(t.hasTime && (t.startTime || t.endTime));
     default:         return t[f] === undefined || t[f] === null ? '' : t[f];
   }
 }
@@ -2058,7 +2134,8 @@ function evalLeaf(t, c) {
     case 'enum': {
       if (c.op === 'empty') return !val;
       if (c.op === 'nempty') return !!val;
-      const hit = list.indexOf(val) >= 0;
+      // フォルダは「選んだフォルダか、その中のどこか」に入っていれば当たり
+      const hit = c.f === 'folder' ? list.some(id => folderSubtree(id)[val]) : list.indexOf(val) >= 0;
       return c.op === 'nin' ? !hit : hit;
     }
     case 'text': {
@@ -2080,8 +2157,8 @@ function evalLeaf(t, c) {
       if (c.op === 'nempty') return !!val;
       if (!val) return false;
       if (c.op === 'within') return val >= todayStr() && val <= addDays(todayStr(), Number(list[0] || 0));
-      const b = resolveDateValue(list[0]);
-      if (!b) return true;
+      // 値が空のときは「今日」とみなす（編集画面は空でも「今日」と表示しているため。以前は空＝条件なしになっていた）
+      const b = resolveDateValue(list[0] || 'today');
       return c.op === 'eq' ? val === b : c.op === 'lte' ? val <= b : c.op === 'gte' ? val >= b : c.op === 'lt' ? val < b : val > b;
     }
   }
@@ -2114,8 +2191,10 @@ function condSummary(node, depth) {
   const def = condField(node.f);
   if (!def) return '';
   const opLabel = ((COND_OPS[def.type] || []).find(o => o[0] === node.op) || ['', node.op])[1];
-  const vals = (Array.isArray(node.v) ? node.v : (node.v === undefined || node.v === '' ? [] : [node.v]))
+  let vals = (Array.isArray(node.v) ? node.v : (node.v === undefined || node.v === '' ? [] : [node.v]))
     .map(v => def.label2 ? def.label2(v) : def.short ? def.short(v) : v);
+  if (def.type === 'date' && node.op !== 'within' && !vals.filter(Boolean).length) vals = ['today'];
+  vals = vals.map(v => def.type === 'date' ? relDateLabel(v) : v);
   const showVal = ['empty', 'nempty', 'true', 'false'].indexOf(node.op) < 0;
   return def.label + (showVal ? '「' + vals.join('・') + '」' : '') + opLabel;
 }
@@ -2190,7 +2269,8 @@ const CondUI = {
     const noVal = ['empty', 'nempty', 'true', 'false'].indexOf(c.op) >= 0;
     return '<div class="cond-leaf flex flex-wrap items-start gap-1.5 rounded bg-white p-1.5 ring-1 ring-slate-100" data-path="' + path + '">' +
       '<select class="cl-f max-w-[11rem] rounded border border-slate-300 px-1.5 py-1 text-xs" data-path="' + path + '">' +
-        COND_FIELDS.map(x => '<option value="' + x.f + '"' + (x.f === def.f ? ' selected' : '') + '>' + esc(x.label) + '</option>').join('') +
+        // 旧項目（大中小分類・分類）は、すでに使っている条件のときだけ選択肢に残す
+        COND_FIELDS.filter(x => !x.legacy || x.f === def.f).map(x => '<option value="' + x.f + '"' + (x.f === def.f ? ' selected' : '') + '>' + esc(x.label) + '</option>').join('') +
       '</select>' +
       (noVal ? '' : this.valueHtml(def, c, path)) +
       '<select class="cl-op rounded border border-slate-300 px-1.5 py-1 text-xs" data-path="' + path + '">' +
@@ -2332,63 +2412,132 @@ function legacyFilterToCond(f) {
   return { g: 'and', items: items };
 }
 
-/* ---- スコア（並び順の点数）----
-   1回の描画の中で同じタスクのスコアを何度も計算しないよう、世代番号つきで覚えておく。
-   （並び替えは比較のたびにスコアを使うため、件数が多いと重くなる） */
-let SCORE_GEN = 1;
-const SCORE_CACHE = new WeakMap();
-function bumpScores() { SCORE_GEN++; }
+/* =========================================================================
+ * 並び順（2026-10-29 作り替え）：絶対ソート ＋ 優先ソート
+ * =========================================================================
+ * 以前は「配点の合計」1本で並べていたため、点数の足し算しだいで順番が入れ替わり、
+ * 「必ずこの順」が保証できなかった。2段構えにする。
+ *
+ *  ① 絶対ソート（S.settings.sortTiers）… 上から順に条件を見て、最初に当てはまった「段」に入る。
+ *     段の順番は絶対。段ごとに「段の中の並べ方」（絶対期限順など）を持てる。
+ *  ② 優先ソート（S.settings.priorityRules）… 同じ段で、段の並べ方でも同じ順位のときに、
+ *     当てはまるルールの点数の合計が大きいものを上にする。
+ *  ③ それでも同じなら、期限（早い順）→ 実行日（早い順）。
+ */
+const TODAY_LIMIT_DAYS = 30;
+const DEFAULT_SORT_TIERS = [
+  { id: 'tNow',     name: '今すぐやる',                    orderBy: '',        cond: { g: 'and', items: [{ f: 'gtd', op: 'in', v: ['01-1_今すぐやる'] }] } },
+  { id: 'tTime',    name: '時刻が来た時間指定タスク',       orderBy: 'exec',    cond: { g: 'and', items: [{ f: 'timeReached', op: 'true' }] } },
+  { id: 'tOver',    name: '期限超過（超過している順）',     orderBy: 'overdue', cond: { g: 'and', items: [{ f: 'overdue', op: 'true' }] } },
+  { id: 'tHardDay', name: '絶対期限が今日',                 orderBy: '',        cond: { g: 'and', items: [{ f: 'hardDue', op: 'eq', v: ['today'] }] } },
+  { id: 'tContact', name: '連絡する・依頼する',             orderBy: '',        cond: { g: 'and', items: [{ f: 'gtd', op: 'in', v: ['03-1_連絡する・依頼する'] }] } },
+  { id: 'tHard30',  name: '絶対期限が明日〜1か月後',        orderBy: 'hardDue', cond: { g: 'and', items: [{ f: 'hardDue', op: 'gte', v: ['today+1'] }, { f: 'hardDue', op: 'lte', v: ['today+30'] }] } },
+  { id: 'tAsapOld', name: 'ASAP かつ登録から1週間',          orderBy: '',        cond: { g: 'and', items: [{ f: 'asap', op: 'true' }, { f: 'created', op: 'lte', v: ['today-7'] }] } },
+  { id: 'tHardFar', name: '絶対期限が1か月より先',          orderBy: 'hardDue', cond: { g: 'and', items: [{ f: 'hardDue', op: 'gt', v: ['today+30'] }] } }
+];
+const DEFAULT_PRIORITY_RULES = [
+  { id: 'pAsap', name: 'ASAP',                     points: 100, cond: { g: 'and', items: [{ f: 'asap', op: 'true' }] } },
+  { id: 'pHigh', name: '重要度「高」',              points: 10,  cond: { g: 'and', items: [{ f: 'importance', op: 'in', v: ['高'] }] } },
+  { id: 'pClock', name: '開始・終了時刻が決まっている', points: 1, cond: { g: 'and', items: [{ f: 'hasClock', op: 'true' }] } }
+];
+const TIER_ORDER_BY = [['', '並べ方の指定なし'], ['hardDue', '絶対期限が早い順'], ['overdue', '期限を過ぎている日数が多い順'],
+                       ['due', '目標期限が早い順'], ['exec', '実行日・時刻が早い順'], ['created', '登録が古い順']];
 
-function taskScore(t) {
-  const hit = SCORE_CACHE.get(t);
-  if (hit && hit.gen === SCORE_GEN) return hit.v;
-  const v = scoreBreakdown(t).reduce((a, x) => a + x.score, 0);
-  SCORE_CACHE.set(t, { gen: SCORE_GEN, v: v });
-  return v;
+/** 時間指定タスクの時刻が来たか（実行日が過去、または今日で開始〔なければ終了〕時刻を過ぎた） */
+function timeReached(t) {
+  if (!t.hasTime || !t.execDate || t.status === 'Done') return false;
+  const today = todayStr();
+  if (t.execDate < today) return true;
+  if (t.execDate > today) return false;
+  const hm = String(t.startTime || t.endTime || '').slice(0, 5);
+  if (!hm) return false;
+  const d = new Date();
+  return hm <= ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
 }
-
-/** スコアの内訳（設定画面や詳細表示で「なぜ上位なのか」を示す）。taskScore はこの合計 */
-function scoreBreakdown(t) {
-  const R = sortRules(), today = todayStr(), out = [];
-  const add = (label, v) => { if (v) out.push({ label: label, score: Number(v) }); };
-  if (t.gtd === '01-1_今すぐやる') add('今すぐやる', R.gtdNow);
-  const named = R.namedTasks || [];
-  for (let i = 0; i < named.length; i++) {
-    if (named[i] && t.name === named[i].name) { add('固定タスク「' + named[i].name + '」', named[i].score); break; }
-  }
-  // 絶対期限は目標期限より必ず上に来るよう、別枠で大きく加点する
-  if (t.hardDue && t.status !== 'Done') {
-    if (t.hardDue <= today) add('絶対期限が今日まで', R.hardDueToday);
-    else if (t.hardDue <= addDays(today, 3)) add('絶対期限が3日以内', R.hardDueWithin3);
-    else if (t.hardDue <= addDays(today, 7)) add('絶対期限が7日以内', R.hardDueWithin7);
-  }
-  const due = t.due || (isProvisional(t) ? provisionalDates(t).due : '');
-  if (due) {
-    const lab = t.due ? '目標期限' : '仮期限';
-    if (due <= today) add(lab + 'が今日まで', R.dueToday);
-    else if (due <= addDays(today, 7)) add(lab + 'が7日以内', R.dueWithin7);
-    else if (due <= addDays(today, 14)) add(lab + 'が14日以内', R.dueWithin14);
-  }
-  if (t.gtd === '03-1_連絡する・依頼する') add('連絡する・依頼する', R.gtdContact);
-  if (t.asap) add('ASAP', R.asap);
-  if (t.gtd === '03-1_連絡する・依頼する' && t.asap) add('連絡×ASAP', R.contactAndAsap);
-  if (t.endTime && t.due) add('終了時刻＋期限あり', R.endTimeAndDue);
-  else if (t.due) add('期限あり', R.dueOnly);
-  if (t.importance === '高') add('重要度:高', R.importanceHigh);
-  if (t.execDate === today) add('実行日が今日', R.execToday);
-  if (t.due && t.due < today && t.status !== 'Done') add('期限超過', R.overdue);
-  // 自作の配点ルール（条件式つき）
-  ((S.settings && S.settings.scoreRules) || []).forEach(r => {
-    if (r && r.enabled !== false && Number(r.points) && evalCond(t, r.cond)) add(r.name || '自作ルール', r.points);
+/** 期限超過（目標期限・絶対期限のどちらかが昨日以前）。仮期限は含めない */
+function isOverdue(t) {
+  if (t.status === 'Done') return false;
+  const today = todayStr();
+  return !!((t.due && t.due < today) || (t.hardDue && t.hardDue < today));
+}
+function sortTiers() {
+  const v = S.settings && S.settings.sortTiers;
+  return (Array.isArray(v) ? v : DEFAULT_SORT_TIERS).filter(x => x && x.enabled !== false);
+}
+/**
+ * 優先ソートのルール。まだ保存されていなければ既定（ASAP・重要度高・時刻あり）に、
+ * 以前の「自作の配点ルール」と「特定タスク名の固定加点」を引き継いで作る（作った設定を消さないため）。
+ */
+function priorityRules() {
+  const v = S.settings && S.settings.priorityRules;
+  if (Array.isArray(v)) return v.filter(x => x && x.enabled !== false);
+  return migratedPriorityRules(S.settings || {}).filter(x => x.enabled !== false);
+}
+function migratedPriorityRules(st) {
+  const out = JSON.parse(JSON.stringify(DEFAULT_PRIORITY_RULES));
+  (st.scoreRules || []).forEach(r => { if (r && r.cond) out.push(Object.assign({}, r, { id: r.id || newCfgId('p') })); });
+  ((st.sortRules || {}).namedTasks || []).forEach((n, i) => {
+    if (n && n.name) out.push({ id: 'pName' + i, name: '固定タスク「' + n.name + '」', points: Number(n.score || 0),
+                               cond: { g: 'and', items: [{ f: 'name', op: 'contains', v: [n.name] }] } });
   });
   return out;
 }
 
+/* 1回の描画の中で同じタスクの順位を何度も計算しないよう、世代番号つきで覚えておく */
+let SCORE_GEN = 1;
+const SCORE_CACHE = new WeakMap();
+function bumpScores() { SCORE_GEN++; }
+
+/** タスクの並び順の情報：{ tier: 何段目（0から）, tierName, key: 段の中の並べ方の値, prio: 優先ソートの点数, hits: 当てはまった優先ルール } */
+function taskRank(t) {
+  const hit = SCORE_CACHE.get(t);
+  if (hit && hit.gen === SCORE_GEN) return hit.v;
+  const tiers = sortTiers();
+  let tier = tiers.length, tierName = 'その他', key = '';
+  for (let i = 0; i < tiers.length; i++) {
+    if (evalCond(t, tiers[i].cond)) {
+      tier = i; tierName = tiers[i].name;
+      const ob = tiers[i].orderBy;
+      key = ob === 'hardDue' ? (t.hardDue || '9999')
+          : ob === 'overdue' ? ([t.due, t.hardDue].filter(Boolean).sort()[0] || '9999')
+          : ob === 'due' ? (t.due || '9999')
+          : ob === 'exec' ? ((t.execDate || '9999') + ' ' + (t.startTime || t.endTime || '99:99'))
+          : ob === 'created' ? (String(t.created || '') || '9999') : '';
+      break;
+    }
+  }
+  const hits = priorityRules().filter(r => Number(r.points) && evalCond(t, r.cond));
+  const prio = hits.reduce((a, r) => a + Number(r.points), 0);
+  const v = { tier: tier, tierName: tierName, key: key, prio: prio, hits: hits };
+  SCORE_CACHE.set(t, { gen: SCORE_GEN, v: v });
+  return v;
+}
+
+/** 数値の「スコア」（列の並べ替え・古い表示との互換用）。段が上ほど大きく、同じ段では優先ソートの点数 */
+function taskScore(t) {
+  const r = taskRank(t);
+  return (sortTiers().length + 1 - r.tier) * 1000000 + r.prio;
+}
+/** 画面に出す短い順位表示：「③絶対期限が今日 +110」 */
+function rankLabel(t) {
+  const r = taskRank(t);
+  const n = r.tier < sortTiers().length ? '①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮'.charAt(r.tier) || String(r.tier + 1) : '－';
+  return n + ' ' + r.tierName + (r.prio ? ' +' + r.prio : '');
+}
+
+/** なぜこの順位か（段の名前と、当てはまった優先ルール） */
+function scoreBreakdown(t) {
+  const r = taskRank(t);
+  return [{ label: r.tierName, score: 0 }].concat(r.hits.map(h => ({ label: h.name || 'ルール', score: Number(h.points) })));
+}
+
 const byScoreDesc = (a, b) => {
-  const d = taskScore(b) - taskScore(a);
-  if (d) return d;
-  const x = effDue(a) || effExec(a) || '9999', y = effDue(b) || effExec(b) || '9999';
-  return x < y ? -1 : x > y ? 1 : 0;
+  const x = taskRank(a), y = taskRank(b);
+  if (x.tier !== y.tier) return x.tier - y.tier;                       // ① 段の順（絶対）
+  if (x.key !== y.key) return x.key < y.key ? -1 : 1;                 //    段の中の並べ方
+  if (x.prio !== y.prio) return y.prio - x.prio;                      // ② 優先ソート
+  const p = effDue(a) || effExec(a) || '9999', q = effDue(b) || effExec(b) || '9999';   // ③ 期限・実行日
+  return p < q ? -1 : p > q ? 1 : 0;
 };
 
 /* =========================================================================
@@ -2708,10 +2857,10 @@ function buildSelects() {
   applyTabOrder();
   $('#mStatus').innerHTML = S.options.status.map(s => opt(s, s)).join('');
   $('#mGtd').innerHTML = S.options.gtd.map(g => opt(g, g)).join('');
-  $('#mProject').innerHTML = '<option value="">（プロジェクトなし）</option>' + S.projects.map(p => opt(p.id, p.name)).join('');
+  $('#mProject').innerHTML = '<option value="">（フォルダなし）</option>' + folderOptionsHtml('');   // フォルダの入れ子を字下げで表示
   $('#mRepeat').innerHTML = S.options.repeatRule.map(r => opt(r, r || '（なし）')).join('');
   $('#pStatus').innerHTML = S.options.projectStatus.map(s => opt(s, s)).join('');
-  $('#assigneeList').innerHTML = S.assignees.map(a => '<option value="' + esc(a) + '">').join('');
+  $('#assigneeList').innerHTML = assigneeCandidates().map(a => '<option value="' + esc(a) + '">').join('');   // 一覧から選べる候補（担当者マスタ＋使ったことのある名前）
   const chips = (containerId) => S.categories.map(c =>
     '<label class="cursor-pointer"><input type="checkbox" class="peer sr-only" value="' + esc(c.id) + '">' +
     '<span class="inline-block rounded-full border border-slate-300 px-2.5 py-1 text-xs peer-checked:border-indigo-500 peer-checked:bg-indigo-50 peer-checked:text-indigo-700">' +
@@ -2777,20 +2926,13 @@ function taskAxes(t) {
 function msDefs() { return orderBy(baseMsDefs(), (S.settings && S.settings.filterOrder) || [], d => d.key); }
 function baseMsDefs() {
   return [
-    { key: 'project',    label: 'プロジェクト', opts: [{ v: '__none', l: '（未設定）' }].concat(S.projects.map(p => ({ v: p.id, l: p.name }))) },
+    { key: 'project',    label: 'フォルダ', opts: [{ v: '__none', l: '（フォルダなし）' }].concat(folderTreeList().map(x => ({ v: x.p.id, l: '\u3000'.repeat(x.depth) + (x.depth ? '└ ' : '') + x.p.name, s: folderPathStr(x.p.id) }))) },
     { key: 'gtd',        label: 'GTD種別',     opts: (S.options.gtd || []).map(g => ({ v: g, l: gtdShort(g) })) },
-    { key: 'category',   label: '分類',         opts: S.categories.map(c => ({ v: c.id, l: c.name })) },
     { key: 'assignee',   label: '担当者',       opts: [{ v: '__me', l: '自分' }].concat((S.assignees || []).map(a => ({ v: a, l: a }))) },
     { key: 'importance', label: '重要度',       opts: [{ v: '高', l: '高' }, { v: '低', l: '低' }, { v: '__none', l: '未設定' }] },
     { key: 'status',     label: 'ステータス',   opts: [{ v: 'ToDo', l: 'ToDo' }, { v: 'InProgress', l: 'InProgress' }, { v: 'Done', l: 'Done' }] },
     { key: 'location',   label: '場所',         opts: (S.options.location || []).filter(Boolean).map(v => ({ v: v, l: v })).concat([{ v: '__none', l: '未設定' }]) }
-  ].concat(
-    // 3階層分類は「実際に使われている値がある軸」だけ出す（空の絞り込みを並べない）
-    PROJECT_AXES.map(a => ({ axis: a.key, key: a.filter, label: a.label, opts: axisValues(a.key) }))
-      .filter(d => d.opts.length)
-      .map(d => ({ key: d.key, label: d.label,
-                   opts: d.opts.map(v => ({ v: v, l: v })).concat([{ v: '__none', l: '（未設定）' }]) }))
-  );
+  ];   // 分類・大中小分類の絞り込みは廃止（2026-10-29：フォルダで絞り込む）
 }
 
 /**
@@ -2859,7 +3001,7 @@ function filterPanel(panel, q) {
   let hits = 0;
   panel.querySelectorAll('label').forEach(l => {
     const cb = l.querySelector('input');
-    const hit = matchTerms(l.textContent, terms) || (cb && cb.checked);
+    const hit = matchTerms(l.textContent + (l.dataset.s ? SEARCH_SEP + l.dataset.s : ''), terms) || (cb && cb.checked);   // data-s：フォルダの道筋でも当てる
     setHidden(l, !hit);          // hidden属性＋クラスの二段構えで確実に消す
     if (hit) hits++;
   });
@@ -2886,7 +3028,7 @@ function renderMultiSelects() {
   $('#msRow').innerHTML = msDefs().map(d => {
     const sel = S.f[d.key] || [];
     const label = sel.length === 0 ? d.label + '：全て'
-      : sel.length === 1 ? d.label + '：' + esc((d.opts.find(o => o.v === sel[0]) || { l: sel[0] }).l)
+      : sel.length === 1 ? d.label + '：' + esc((function (o) { return o.s || o.l; })(d.opts.find(o => o.v === sel[0]) || { l: sel[0] }))
       : d.label + '：' + sel.length + '件';
     return '<div class="ms relative" data-key="' + d.key + '">' +
       '<button class="ms-btn w-full truncate rounded-lg border px-2 py-2 text-left text-xs ' +
@@ -2895,9 +3037,9 @@ function renderMultiSelects() {
       '<div class="ms-panel absolute left-0 top-full z-[60] mt-1 hidden max-h-72 w-64 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-xl">' +
         (d.opts.length > 8 ? '<input class="ms-search mb-1 w-full rounded border border-slate-300 px-2 py-1 text-xs" placeholder="名前で絞り込み" value="' + esc(S.msSearch[d.key] || '') + '">' : '') +
         '<button class="ms-clear mb-1 w-full rounded px-2 py-1 text-left text-[11px] text-slate-500 hover:bg-slate-50">すべて解除</button>' +
-        d.opts.map(o => '<label class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-slate-50">' +
+        d.opts.map(o => '<label class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-slate-50"' + (o.s ? ' data-s="' + esc(o.s) + '"' : '') + '>' +
           '<input type="checkbox" class="ms-cb rounded border-slate-300" value="' + esc(o.v) + '"' + (sel.indexOf(o.v) >= 0 ? ' checked' : '') + '>' +
-          '<span class="truncate">' + esc(o.l) + '</span></label>').join('') +
+          '<span class="truncate' + (o.s ? ' whitespace-pre' : '') + '">' + esc(o.l) + '</span></label>').join('') +
       '</div></div>';
   }).join('');
   applyMsSearchFilters();      // 作り直したあとも絞り込み状態を維持する
@@ -2932,13 +3074,18 @@ function filtered(extra) {
   };
 
   const slice = S.activeSlice ? allSlices().filter(x => x.id === S.activeSlice)[0] : null;
+  let selPSet = null;
+  if ((S.f.project || []).length) {
+    selPSet = {};
+    S.f.project.forEach(id => { if (id === '__none') selPSet.__none = true; else Object.assign(selPSet, folderSubtree(id)); });
+  }
 
   return S.tasks.filter(t => {
     if (slice && !sliceHit(t, slice)) return false;
     if (!matchTerms(t.name + SEARCH_SEP + t.memo, qTerms)) return false;
 
-    const selP = S.f.project || [];
-    if (selP.length && !(selP.indexOf(t.project) >= 0 || (!t.project && selP.indexOf('__none') >= 0))) return false;
+    // フォルダで絞り込むと、その中のフォルダに入っているタスクも含める
+    if (selPSet && !(selPSet[t.project] || (!t.project && selPSet.__none))) return false;
 
     if (!has('gtd', t.gtd)) return false;
 
@@ -2959,14 +3106,6 @@ function filtered(extra) {
     const selL = S.f.location || [];
     if (selL.length && !(selL.indexOf(t.location) >= 0 || (!t.location && selL.indexOf('__none') >= 0))) return false;
 
-    // プロジェクトの3階層分類（タスク自身ではなく、所属プロジェクトの値で絞る）
-    for (let ai = 0; ai < PROJECT_AXES.length; ai++) {
-      const a = PROJECT_AXES[ai];
-      const selAx = S.f[a.filter] || [];
-      if (!selAx.length) continue;
-      const v = taskAxes(t)[a.key];
-      if (!(selAx.indexOf(v) >= 0 || (!v && selAx.indexOf('__none') >= 0))) return false;
-    }
 
     if (f.overdue) { const d = t.due || t.execDate; if (!d || d >= today || t.status === 'Done') return false; }
     if (f.thisWeek) { const d = t.execDate || t.due; if (!d || d < today || d > weekEnd) return false; }
@@ -2976,13 +3115,40 @@ function filtered(extra) {
   });
 }
 
+/* -------------------------------------------------------------------------
+ * ウィジェット・ロック画面の「今やるタスク」をアプリと同じ並びにする（2026-10-30）
+ * -------------------------------------------------------------------------
+ * 自分で作った段・配点の条件式は画面（このファイル）でしか判定できない。
+ * そこで画面が計算した上位15件の順番をサーバー（userState.nowOrder）に預け、
+ * ウィジェットはそれを使う（24時間より古ければサーバー側の既定の並びに戻る）。
+ * 変わったとき・2時間ごとにだけ送るので、通信はほとんど増えない。
+ */
+let NOW_ORDER_TIMER = null, NOW_ORDER_LAST = { sig: '', at: 0 };
+function scheduleNowOrderPush() {
+  clearTimeout(NOW_ORDER_TIMER);
+  NOW_ORDER_TIMER = setTimeout(() => {
+    try {
+      const today = todayStr();
+      const inc = ['01-1_今すぐやる', '02_要細分化', '03-1_連絡する・依頼する', '04_実行待ち'];
+      const ids = S.tasks.filter(t => t.status !== 'Done' && inc.indexOf(t.gtd) >= 0 && (!t.execDate || t.execDate <= today) && !/^tmp_/.test(t.id))
+        .sort(byScoreDesc).slice(0, 15).map(t => t.id);
+      const sig = ids.join(',');
+      if (sig === NOW_ORDER_LAST.sig && Date.now() - NOW_ORDER_LAST.at < 2 * 3600 * 1000) return;
+      NOW_ORDER_LAST = { sig: sig, at: Date.now() };
+      api.saveUserState({ nowOrder: { at: Date.now(), ids: ids } }).catch(() => { NOW_ORDER_LAST.sig = ''; });
+    } catch (e) {}
+  }, 4000);
+}
+
 function renderCurrent() {
   bumpScores();            // 描画のたびにスコアを計算し直す（設定やタスクの変更を反映）
+  if (S.tasks && S.tasks.length) scheduleNowOrderPush();
   renderBell();
   if (S.view === 'focus') renderFocus();
   else if (S.view === 'home') renderHome();
   else if (S.view === 'plan') renderPlan();
   else if (S.view === 'notes') renderNotes();
+  else if (S.view === 'habits') renderHabits();
   else if (S.view === 'rules') renderRules();
   else if (S.view === 'projects') renderProjects();
   else if (S.view === 'kanban') renderKanban();
@@ -3081,7 +3247,7 @@ function activeSliceBar() {
   return '<div class="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-indigo-50 px-3 py-2 text-xs ring-1 ring-indigo-200">' +
     '<span class="font-bold text-indigo-800">🔖 ' + esc(s.name) + '</span>' +
     '<span class="rounded-full bg-white px-2 py-0.5 text-[11px] text-indigo-700">' + n + '件</span>' +
-    '<span class="text-[11px] text-indigo-600/80">' + esc(sliceSummary(s)) + '</span>' +
+    '<span class="hidden text-[11px] text-indigo-600/80 sm:inline">' + esc(sliceSummary(s)) + '</span>' +   // スマホでは場所を取るので省く
     '<button class="slice-clear ml-auto rounded border border-indigo-300 bg-white px-2 py-0.5 text-[11px] text-indigo-700 hover:bg-indigo-100">解除</button></div>';
 }
 
@@ -3145,6 +3311,11 @@ function makeComparator(keys) {
   return (a, b) => {
     for (let i = 0; i < ks.length; i++) {
       const k = ks[i];
+      if (k.f === 'score') {   // 並び順は「絶対ソート→段の中の並べ方→優先ソート」で比べる（点数1本ではない）
+        const d0 = byScoreDesc(a, b);
+        if (d0) return (k.dir || -1) === -1 ? d0 : -d0;
+        continue;
+      }
       const va = sortValue(a, k.f), vb = sortValue(b, k.f);
       const ea = va === '' || va === null || va === undefined, eb = vb === '' || vb === null || vb === undefined;
       if (ea && eb) continue;
@@ -3210,8 +3381,47 @@ function toggleColumnSort(key) {
 /* =========================================================================
  * プロジェクト一覧（進捗の可視化）
  * =======================================================================*/
+/* =========================================================================
+ * 📁 フォルダ（2026-10-29：プロジェクト＝フォルダ。フォルダの中にフォルダを無限に入れられる）
+ * =========================================================================
+ * プロジェクト一覧の各行が1つのフォルダ。p.parent が親フォルダのID（空＝いちばん上）。
+ * タスクの「プロジェクト」＝そのタスクが入っているフォルダ。
+ * フォルダで絞り込むと、その中のフォルダに入っているタスクも全部含める。
+ * 閲覧権限は親から子へ引き継ぐ（サーバー側で判定）。親が見えないフォルダは、いちばん上として扱う。
+ */
+function folderParent(p) { return p && p.parent && S.projMap[p.parent] ? p.parent : ''; }
+function folderChildren(id) { return S.projects.filter(p => folderParent(p) === (id || '')); }
+/** 子孫（子・孫…）のID集合。自分自身も含める */
+function folderSubtree(id) {
+  const out = {}; if (!id) return out;
+  const stack = [id];
+  while (stack.length) { const c = stack.pop(); if (out[c]) continue; out[c] = true; folderChildren(c).forEach(x => stack.push(x.id)); }
+  return out;
+}
+/** 上から順のフォルダ名の列（例：['人材ハイスクール','補助金','R8']） */
+function folderPath(id) {
+  const out = []; let cur = S.projMap[id], guard = 0;
+  while (cur && guard++ < 50) { out.unshift(cur.name || '（名称未設定）'); cur = S.projMap[folderParent(cur)]; }
+  return out;
+}
+function folderPathStr(id) { return folderPath(id).join(' › '); }
+/** フォルダを木の順（親→子）に並べ、深さ付きで返す。選択肢の字下げ用 */
+function folderTreeList() {
+  const out = [];
+  const walk = (pid, depth, seen) => folderChildren(pid).slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'ja'))
+    .forEach(p => { if (seen[p.id]) return; seen[p.id] = true; out.push({ p: p, depth: depth }); walk(p.id, depth + 1, seen); });
+  walk('', 0, {});
+  return out;
+}
+function folderOptionsHtml(selected, excludeSubtreeOf) {
+  const ex = excludeSubtreeOf ? folderSubtree(excludeSubtreeOf) : {};
+  return folderTreeList().filter(x => !ex[x.p.id]).map(x => '<option value="' + esc(x.p.id) + '"' + (x.p.id === selected ? ' selected' : '') + '>' +
+    '\u3000'.repeat(x.depth) + (x.depth ? '└ ' : '') + esc(x.p.name || '（名称未設定）') + '</option>').join('');
+}
+
 function projectStats(p) {
-  const list = S.tasks.filter(t => t.project === p.id);
+  const sub = folderSubtree(p.id);                 // フォルダは中のフォルダのタスクも合算する
+  const list = S.tasks.filter(t => sub[t.project]);
   const done = list.filter(t => t.status === 'Done').length;
   const open = list.length - done;
   const overdue = list.filter(t => t.status !== 'Done' && t.due && t.due < todayStr()).length;
@@ -3232,15 +3442,17 @@ const PROJ_SORTS = [
 const byDateAsc = (a, b) => (a ? a : '9999-99-99').localeCompare(b ? b : '9999-99-99');
 
 function renderProjects() {
-  const terms = searchTerms(S.projQ !== undefined ? S.projQ : $('#q').value);
-  const cats = S.projCats || [];
-  const list = S.projects
-    .filter(p => matchTerms(p.name + SEARCH_SEP + (p.goal || ''), terms))
-    .filter(p => !cats.length || (p.categories || []).some(c => cats.indexOf(c) >= 0))
-    .map(p => Object.assign({}, p, { st: projectStats(p) }));
-  const key = S.projSort || 'progress';
+  const terms = searchTerms(S.projQ || '');
+  if (S.folderAt && !S.projMap[S.folderAt]) S.folderAt = '';          // 消えたフォルダにいたら一番上へ
+  const here = S.folderAt || '';
+  // 検索中は全階層から探す（道筋＝親フォルダの名前でも当たる）。普段は今いるフォルダの直下だけ
+  const base = terms.length
+    ? S.projects.filter(p => matchTerms(folderPath(p.id).join(SEARCH_SEP) + SEARCH_SEP + (p.goal || ''), terms))
+    : folderChildren(here);
+  const list = base.map(p => Object.assign({}, p, { st: projectStats(p), kids: folderChildren(p.id).length }));
+  const key = S.projSort || 'name';
   list.sort((a, b) =>
-    key === 'name' ? a.name.localeCompare(b.name, 'ja') :
+    key === 'name' ? String(a.name).localeCompare(String(b.name), 'ja') :
     key === 'open' ? b.st.open - a.st.open :
     key === 'overdue' ? b.st.overdue - a.st.overdue :
     key === 'progressDesc' ? b.st.pct - a.st.pct :
@@ -3252,76 +3464,85 @@ function renderProjects() {
     key === 'status' ? String(a.status).localeCompare(String(b.status), 'ja') || a.st.pct - b.st.pct :
     a.st.pct - b.st.pct);
 
-  const totals = list.reduce((acc, p) => {
-    acc.total += p.st.total; acc.done += p.st.done; acc.overdue += p.st.overdue;
-    if (p.status !== 'Done' && p.st.open) acc.active++;
-    return acc;
-  }, { total: 0, done: 0, overdue: 0, active: 0 });
+  // パンくず：🗂 すべて › A › B（どこでも押して戻れる）
+  const crumbs = [];
+  let cur = S.projMap[here], guard = 0;
+  while (cur && guard++ < 50) { crumbs.unshift(cur); cur = S.projMap[folderParent(cur)]; }
+  const crumbHtml = '<nav class="fold-crumbs flex flex-wrap items-center gap-1 text-sm" aria-label="フォルダの場所">' +
+    '<button class="fold-go rounded px-1.5 py-0.5 ' + (here ? 'text-indigo-600 hover:bg-indigo-50' : 'font-bold text-slate-800') + '" data-fid="">🗂 すべて</button>' +
+    crumbs.map((p, i) => '<span class="text-slate-300">›</span><button class="fold-go rounded px-1.5 py-0.5 ' +
+      (i === crumbs.length - 1 ? 'font-bold text-slate-800' : 'text-indigo-600 hover:bg-indigo-50') + '" data-fid="' + esc(p.id) + '">' + esc(p.name || '（名称未設定）') + '</button>').join('') +
+    '</nav>';
 
+  const hereP = S.projMap[here];
   $('#projTools').innerHTML = activeSliceBar() +
+    '<div class="flex flex-col gap-2">' + crumbHtml +
     '<div class="flex flex-wrap items-center gap-2">' +
-      '<button id="projNew" class="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">＋ 新規プロジェクト</button>' +
+      (here ? '<button class="fold-go shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-50" data-fid="' + esc(folderParent(hereP)) + '">← 上へ</button>' : '') +
+      '<button id="projNew" class="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">＋ フォルダ' + (here ? '（この中に）' : '') + '</button>' +
+      (here ? '<button id="foldTaskNew" class="shrink-0 rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">＋ タスク（この中に）</button>' +
+              '<button class="proj-edit shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-50" data-pid="' + esc(here) + '">✎ このフォルダを編集</button>' : '') +
       '<input id="projQ" type="search" class="w-44 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" ' +
-        'placeholder="プロジェクト名で検索（スペース区切り可）" value="' + esc(S.projQ || '') + '">' +
-      '<select id="projCat" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-600">' +
-        '<option value="">分類：すべて</option>' +
-        S.categories.map(c => '<option value="' + esc(c.id) + '"' + ((S.projCats || []).indexOf(c.id) >= 0 ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('') +
-      '</select>' +
+        'placeholder="フォルダを探す（全階層）" value="' + esc(S.projQ || '') + '">' +
       '<select id="projSort" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-600">' +
         PROJ_SORTS.map(o => '<option value="' + o[0] + '"' + (key === o[0] ? ' selected' : '') + '>並び: ' + o[1] + '</option>').join('') +
       '</select>' +
-      ((S.projQ || (S.projCats || []).length)
-        ? '<button id="projClear" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-500 hover:bg-slate-50">条件クリア</button>' : '') +
-      '<span class="text-xs text-slate-500">進行中 ' + totals.active + ' / 表示 ' + list.length + '件（全' + S.projects.length + '）　タスク ' +
-        totals.done + '/' + totals.total + ' 完了' + (totals.overdue ? '　<span class="text-rose-600">期限超過 ' + totals.overdue + '</span>' : '') + '</span>' +
-    '</div>';
+      (S.projQ ? '<button id="projClear" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-500 hover:bg-slate-50">検索をやめる</button>' : '') +
+    '</div></div>';
 
-  $('#projBody').innerHTML = '<div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">' +
-    (list.map(p => {
-      const s = p.st;
-      const bar = s.pct >= 100 ? '#10B981' : s.overdue ? '#f43f5e' : '#6366f1';
-      return '<div class="proj-card cursor-pointer rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200 hover:shadow-md" data-pid="' + esc(p.id) + '">' +
-        '<div class="mb-1 flex flex-wrap items-center gap-1.5">' +
-          '<span class="truncate text-sm font-bold text-slate-800">' + esc(p.name || '(名称未設定)') + '</span>' +
-          '<span class="rounded-full px-1.5 py-0.5 text-[10px] ' + (p.status === 'Done' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700') + '">' + esc(p.status) + '</span>' +
-          (s.overdue ? '<span class="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] text-rose-700">超過 ' + s.overdue + '</span>' : '') +
-        '</div>' +
-        // 大 › 中 › 小 のパンくず（設定されている分だけ）
-        (function () {
-          const path = PROJECT_AXES.map(a => String(p[a.key] || '').trim()).filter(Boolean);
-          return path.length ? '<p class="mb-1 truncate text-[10px] text-slate-400">' +
-            path.map(esc).join(' <span class="text-slate-300">›</span> ') + '</p>' : '';
-        })() +
-        '<div class="mb-1 h-2 w-full overflow-hidden rounded-full bg-slate-100">' +
-          '<div class="h-full rounded-full" style="width:' + s.pct + '%;background:' + bar + '"></div></div>' +
-        '<div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">' +
-          '<span class="font-bold text-slate-700">' + s.pct + '%</span>' +
-          '<span>' + s.done + ' / ' + s.total + ' 完了</span>' +
-          '<span>未完了 ' + s.open + '</span>' +
-          '<span>👥 ' + (p.members ? p.members.length : 0) + '</span>' +
-        '</div>' +
-        (function () {
-          const ms = projMilestones(p);
-          if (!ms.length) return '';
-          const next = ms.filter(m => m.due && m.due >= todayStr())[0] || ms[0];
-          return '<p class="mt-1 truncate text-[11px] text-slate-600">🎯 ' + esc(next.goal || '(目標未記入)') +
-            (next.due ? ' <span class="text-slate-400">〜' + next.due + '</span>' : '') +
-            (ms.length > 1 ? ' <span class="rounded bg-slate-100 px-1 text-[10px] text-slate-500">全' + ms.length + '件</span>' : '') + '</p>';
-        })() +
-        '<div class="mt-1 flex flex-wrap gap-x-3 text-[10px] text-slate-400">' +
-          '<span>期間 ' + (p.start || '—') + ' 〜 ' + (p.end || '—') + '</span>' +
-          (p.deadline ? '<span class="font-medium ' + (p.deadline < todayStr() && p.status !== 'Done' ? 'text-rose-600' : 'text-slate-500') +
-            '">🚩 期限 ' + p.deadline + '</span>' : '') +
-          (p.categories || []).map(c => '<span>' + esc(S.catMap[c] || c) + '</span>').join('') +
-        '</div>' +
-        '<div class="mt-2 flex flex-wrap gap-1.5">' +
-          '<button class="proj-open rounded border border-slate-300 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50" data-pid="' + esc(p.id) + '">タスクを見る</button>' +
-          '<button class="proj-memo rounded border border-slate-300 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50" data-pid="' + esc(p.id) + '">メモ</button>' +
-          '<button class="proj-edit rounded border border-slate-300 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50" data-pid="' + esc(p.id) + '">✎ 編集</button>' +
-          '<button class="proj-del ml-auto rounded border border-rose-200 px-2 py-1 text-[10px] text-rose-600 hover:bg-rose-50" data-pid="' + esc(p.id) + '">🗑 削除</button>' +
-        '</div></div>';
-    }).join('') || '<p class="col-span-full py-10 text-center text-sm text-slate-400">プロジェクトがありません</p>') +
-  '</div>';
+  const card = p => {
+    const s = p.st;
+    const bar = s.pct >= 100 ? '#10B981' : s.overdue ? '#f43f5e' : '#6366f1';
+    const ms = projMilestones(p);
+    const next = ms.length ? (ms.filter(m => m.due && m.due >= todayStr())[0] || ms[0]) : null;
+    return '<div class="proj-card fold-card cursor-pointer rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200 hover:shadow-md" data-pid="' + esc(p.id) + '">' +
+      '<div class="mb-1 flex flex-wrap items-center gap-1.5">' +
+        '<span class="text-base" aria-hidden="true">' + (p.kids ? '📂' : '📁') + '</span>' +
+        '<span class="min-w-0 flex-1 truncate text-sm font-bold text-slate-800">' + esc(p.name || '(名称未設定)') + '</span>' +
+        (p.status === 'Done' ? '<span class="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">Done</span>' : '') +
+        (s.overdue ? '<span class="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] text-rose-700">超過 ' + s.overdue + '</span>' : '') +
+      '</div>' +
+      (terms.length && folderParent(p) ? '<p class="mb-1 truncate text-[10px] text-slate-400">' + esc(folderPath(folderParent(p)).join(' › ')) + '</p>' : '') +
+      '<div class="mb-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">' +
+        '<div class="h-full rounded-full" style="width:' + s.pct + '%;background:' + bar + '"></div></div>' +
+      '<div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">' +
+        (p.kids ? '<span>📁 ' + p.kids + '</span>' : '') +
+        '<span>未完了 ' + s.open + '</span>' +
+        '<span>' + s.done + '/' + s.total + ' 完了</span>' +
+        ((p.members || []).length ? '<span>👥 ' + p.members.length + '</span>' : '') +
+        (p.deadline ? '<span class="' + (p.deadline < todayStr() && p.status !== 'Done' ? 'text-rose-600' : '') + '">🚩 ' + p.deadline + '</span>' : '') +
+      '</div>' +
+      (next ? '<p class="mt-1 truncate text-[11px] text-slate-600">🎯 ' + esc(next.goal || '(目標未記入)') +
+        (next.due ? ' <span class="text-slate-400">〜' + next.due + '</span>' : '') + '</p>' : '') +
+      '<div class="mt-2 flex flex-wrap gap-1.5">' +
+        '<button class="proj-open rounded border border-slate-300 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50" data-pid="' + esc(p.id) + '">タスク一覧へ</button>' +
+        '<button class="proj-memo rounded border border-slate-300 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50" data-pid="' + esc(p.id) + '">メモ</button>' +
+        '<button class="proj-edit rounded border border-slate-300 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50" data-pid="' + esc(p.id) + '">✎ 編集・移動</button>' +
+        '<button class="proj-del ml-auto rounded border border-rose-200 px-2 py-1 text-[10px] text-rose-600 hover:bg-rose-50" data-pid="' + esc(p.id) + '">🗑</button>' +
+      '</div></div>';
+  };
+
+  // 今いるフォルダに直接入っているタスク（中のフォルダの分は、そのフォルダを開くと見える）
+  let taskHtml = '';
+  if (here && !terms.length) {
+    const own = S.tasks.filter(t => t.project === here && t.status !== 'Done').sort(sorter());
+    const doneN = S.tasks.filter(t => t.project === here && t.status === 'Done').length;
+    taskHtml = '<h3 class="mb-1 mt-4 text-xs font-bold text-slate-500">📄 このフォルダのタスク・メモ（' + own.length + '件' + (doneN ? '／Done ' + doneN + '件' : '') + '）</h3>' +
+      (own.length ? '<div class="space-y-1">' + own.map(t =>
+        '<div class="flex items-center gap-1.5 rounded-lg bg-white px-2 py-1.5 ring-1 ring-slate-100">' +
+          '<span class="min-w-0 flex-1 cursor-pointer truncate text-xs open-task" data-id="' + esc(t.id) + '">' +
+            (isAreaLike(t.gtd) ? '🗒 ' : '') + (t.importance === '高' ? '🚩 ' : '') + (t.repeatRule ? '🔁 ' : '') + esc(t.name) + '</span>' +
+          (t.hardDue ? '<span class="shrink-0 rounded bg-rose-50 px-1 text-[10px] font-semibold text-rose-700" title="絶対期限">⛔' + t.hardDue.slice(5) + '</span>' : '') +
+          (t.due ? '<span class="shrink-0 text-[10px] text-slate-400" title="目標期限">' + t.due.slice(5) + '</span>' : '') +
+        '</div>').join('') + '</div>'
+        : '<p class="rounded-lg bg-white py-4 text-center text-[11px] text-slate-400 ring-1 ring-slate-100">このフォルダに直接入っているタスクはありません</p>');
+  }
+
+  $('#projBody').innerHTML =
+    (list.length || !here || terms.length ? '<div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">' +
+      (list.map(card).join('') || '<p class="col-span-full py-10 text-center text-sm text-slate-400">' +
+        (terms.length ? '見つかりませんでした' : 'フォルダがありません。「＋ フォルダ」で作れます') + '</p>') + '</div>' : '') +
+    taskHtml;
 }
 
 /* =========================================================================
@@ -3513,7 +3734,7 @@ function focusCard(t, tone) {
   const bd = scoreBreakdown(t).slice(0, 3).map(b => b.label).join(' / ');
   return '<div class="rounded-xl bg-white p-4 shadow-md ring-1 ' + (running ? 'ring-2 ring-indigo-400' : 'ring-slate-200') + '">' +
     '<div class="mb-1 flex flex-wrap items-center gap-1.5">' +
-      '<span class="rounded px-1.5 py-0.5 text-[10px] font-bold ' + tone + '">スコア ' + taskScore(t) + '</span>' +
+      '<span class="rounded px-1.5 py-0.5 text-[10px] font-bold ' + tone + '">' + esc(rankLabel(t)) + '</span>' +
       (t.importance === '高' ? '<span class="text-sm">🚩</span>' : '') +
       (t.gtd ? '<span class="rounded px-1.5 py-0.5 text-[10px] ' + (GTD_STYLE[t.gtd] || 'bg-slate-100 text-slate-600') + '">' + esc(gtdShort(t.gtd)) + '</span>' : '') +
       (t.repeatRule ? '<span class="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700">🔁</span>' : '') +
@@ -3536,7 +3757,7 @@ function focusCard(t, tone) {
         ? '<button class="focus-act flex-1 rounded-lg bg-slate-100 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-200" data-id="' + esc(t.id) + '" data-act="ToDo">⏸ 中断</button>'
         : '<button class="focus-act flex-1 rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700" data-id="' + esc(t.id) + '" data-act="InProgress">▶ 着手（タイマー開始）</button>') +
       '<button class="focus-act flex-1 rounded-lg py-2.5 text-sm font-semibold text-white hover:opacity-90" style="background:#10B981" data-id="' + esc(t.id) + '" data-act="Done">✓ 完了</button>' +
-      '<button class="task-act shrink-0 rounded-lg border border-rose-200 px-3 py-2.5 text-sm text-rose-700 hover:bg-rose-50" data-id="' + esc(t.id) + '" data-act="pomo" title="ポモドーロで集中する">🍅</button>' +
+
       '<button class="focus-skip shrink-0 rounded-lg border border-slate-300 px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50" data-id="' + esc(t.id) + '" title="' +
         (isProvisional(t) ? '仮の実行日・期限を1週間後へ送ります' : '次点のタスクに切り替えます') + '">↷ ' + (isProvisional(t) ? '1週間後' : 'スキップ') + '</button>' +
     '</div>' +
@@ -3547,7 +3768,7 @@ function focusList(arr) {
   if (!arr.length) return '';
   return '<div class="mt-2 space-y-1.5">' + arr.map(t =>
     '<div class="flex items-center gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-slate-200">' +
-      '<span class="w-10 shrink-0 text-right text-[10px] font-bold text-slate-400">' + taskScore(t) + '</span>' +
+      '<span class="w-6 shrink-0 text-right text-[10px] font-bold text-slate-400" title="' + esc(rankLabel(t)) + '">' + esc(rankLabel(t).charAt(0)) + '</span>' +
       '<span class="min-w-0 flex-1 cursor-pointer truncate open-task" data-id="' + esc(t.id) + '">' +
         (t.importance === '高' ? '🚩 ' : '') + esc(t.name) + '</span>' +
       (t.due ? '<span class="shrink-0 text-[10px] ' + (t.due < todayStr() ? 'text-rose-600' : 'text-slate-400') + '">' + t.due.slice(5) + '</span>' : '') +
@@ -3570,6 +3791,7 @@ function renderFocus() {
   if (grid) grid.classList.toggle('focus-anywhere-first', !!(here && here.outside));
   renderPlaceBar();
   Pomo.render();
+  if ($('#focusWaitAsk')) $('#focusWaitAsk').innerHTML = waitingAskHtml();
   if (!showDual) { renderFocusRest(); return; }
   $('#focusDesk').innerHTML = focusCard(desk[0], 'bg-indigo-100 text-indigo-700') + focusList(desk.slice(1, 4));
   $('#focusAnywhere').innerHTML = focusCard(any[0], 'bg-teal-100 text-teal-700') + focusList(any.slice(1, 4));
@@ -3713,7 +3935,7 @@ function renderFocusRest() {
           '<span class="ml-2 font-normal text-slate-400">日付が変わると自動で候補に戻ります</span></summary>' +
         '<div class="border-t border-slate-100 p-2">' +
         skipped.sort(byScoreDesc).map(t => '<div class="flex flex-wrap items-center gap-2 border-b border-slate-50 py-1.5 last:border-0">' +
-          '<span class="w-10 shrink-0 text-right text-[10px] font-bold text-slate-400">' + taskScore(t) + '</span>' +
+          '<span class="w-6 shrink-0 text-right text-[10px] font-bold text-slate-400" title="' + esc(rankLabel(t)) + '">' + esc(rankLabel(t).charAt(0)) + '</span>' +
           '<span class="min-w-0 max-w-full cursor-pointer truncate text-xs open-task" data-id="' + esc(t.id) + '">' +
             (t.importance === '高' ? '🚩 ' : '') + esc(t.name) + '</span>' +
           '<button class="focus-unskip shrink-0 rounded border border-slate-300 px-2 py-0.5 text-[10px] text-slate-600 hover:bg-slate-50" data-id="' + esc(t.id) + '">↩ 戻す</button>' +
@@ -3900,7 +4122,7 @@ async function taskAction(id, act) {
   if (act === 'pomo') {
     if (modalOpen) closeTask();
     if (t.status !== 'InProgress') focusAction(t.id, 'InProgress');
-    Pomo.start(t.id);
+    Pomo.start();
     switchView('focus');
     return;
   }
@@ -3969,9 +4191,16 @@ const Pomo = {
   cfg() { return Object.assign({ work: 25, short: 5, long: 15 }, (S.settings && S.settings.pomodoro) || {}); },
   load() { try { this.st = JSON.parse(localStorage.getItem(this.KEY) || 'null'); } catch (e) { this.st = null; } this.tick(); },
   save() { try { if (this.st) localStorage.setItem(this.KEY, JSON.stringify(this.st)); else localStorage.removeItem(this.KEY); } catch (e) {} },
-  start(taskId) {
+  start(habit) {
     const c = this.cfg();
-    this.st = { taskId: taskId, phase: 'work', round: 1, endsAt: Date.now() + c.work * 60000, paused: 0 };
+    if (habit && habit.min) {
+      // 🌱 習慣のタイマー：1回だけ。終わったら（または「完了」で）その日の記録に ✓ を付ける
+      this.st = { phase: 'work', round: 1, endsAt: Date.now() + habit.min * 60000, paused: 0, label: habit.label, habitId: habit.habitId, date: habit.date, min: habit.min };
+      this.save(); this.tick();
+      toast('⏱ ' + habit.label + '（' + habit.min + '分）');
+      return;
+    }
+    this.st = { phase: 'work', round: 1, endsAt: Date.now() + c.work * 60000, paused: 0 };
     this.save(); this.tick();
     toast('🍅 ' + c.work + '分 集中します');
   },
@@ -3984,6 +4213,13 @@ const Pomo = {
   },
   next() {
     const c = this.cfg(), s = this.st;
+    if (s.habitId) {
+      const h = s; this.stop();
+      try { beep(); } catch (e) {}
+      if (typeof setHabitLog === 'function') setHabitLog(h.habitId, h.date || todayStr(), 'done', h.min);
+      toast('🌱「' + h.label + '」できました！');
+      return;
+    }
     if (s.phase === 'work') {
       const long = s.round % 4 === 0;
       s.phase = long ? 'long' : 'short';
@@ -4003,25 +4239,48 @@ const Pomo = {
     }, 1000);
     this.render();
   },
+  /** 画面右下に浮かぶタイマー。作業中は赤、休憩中は緑で残り時間を出す（どの画面でも見える） */
   render() {
-    const bar = $('#pomoBar');
-    if (!bar) return;
-    if (!this.st) { bar.hidden = true; bar.innerHTML = ''; return; }
+    let el = document.getElementById('pomoFloat');
+    if (!this.st) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('div'); el.id = 'pomoFloat'; document.body.appendChild(el); }
     const s = this.st;
     const left = Math.max(0, Math.round((s.paused || (s.endsAt - Date.now())) / 1000));
     const mm = String(Math.floor(left / 60)).padStart(2, '0'), ss = String(left % 60).padStart(2, '0');
-    const t = S.tasks.find(x => x.id === s.taskId);
-    bar.hidden = false;
-    bar.innerHTML = '<div class="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-sm shadow-sm ring-1 ' +
-      (s.phase === 'work' ? 'bg-rose-50 ring-rose-200' : 'bg-emerald-50 ring-emerald-200') + '">' +
-      '<span class="text-lg">' + (s.phase === 'work' ? '🍅' : '☕') + '</span>' +
-      '<span class="font-mono text-xl font-bold tabular-nums">' + mm + ':' + ss + '</span>' +
-      '<span class="min-w-0 flex-1 truncate text-xs text-slate-600">' + (s.phase === 'work' ? '集中 ' + s.round + '回目：' : '休憩中　') + esc(t ? t.name : '') + '</span>' +
-      '<button class="pomo-btn rounded border border-slate-300 bg-white px-2 py-1 text-xs" data-p="pause">' + (s.paused ? '再開' : '一時停止') + '</button>' +
-      '<button class="pomo-btn rounded border border-slate-300 bg-white px-2 py-1 text-xs" data-p="skip">次へ</button>' +
-      '<button class="pomo-btn rounded border border-slate-300 bg-white px-2 py-1 text-xs" data-p="stop">終了</button></div>';
+    const work = s.phase === 'work';
+    el.innerHTML = '<div class="rounded-2xl px-3 py-2 text-white shadow-lg" style="background:' + (work ? '#E03E3E' : '#0F9D58') + '">' +
+      '<div class="flex items-baseline gap-2"><span class="max-w-[9rem] truncate text-[11px] opacity-90">' + (s.label ? '🌱 ' + esc(s.label) : work ? '作業 ' + s.round + '回目' : '休憩') + (s.paused ? '（停止中）' : '') + '</span>' +
+      '<span class="font-mono text-2xl font-bold tabular-nums">' + mm + ':' + ss + '</span></div>' +
+      '<div class="mt-1 flex gap-1">' +
+        '<button class="pomo-btn rounded bg-white/20 px-2 py-0.5 text-[11px]" data-p="pause">' + (s.paused ? '再開' : '停止') + '</button>' +
+        '<button class="pomo-btn rounded bg-white/20 px-2 py-0.5 text-[11px]" data-p="skip">' + (s.habitId ? '完了' : '次へ') + '</button>' +
+        '<button class="pomo-btn rounded bg-white/20 px-2 py-0.5 text-[11px]" data-p="stop">終了</button></div></div>';
   }
 };
+
+/* =========================================================================
+ * ⏳ 連絡待ちのまま1週間たったもの → 「Done にしますか？」と聞く（2026-10）
+ * =========================================================================
+ * 自分の手を離れた依頼は、返事が来なくても1週間で区切りをつけたい。
+ * ただし勝手に Done にはせず、ユーザーに選ばせる。
+ * 「まだ待つ」を押すと更新日時が今日になり、1週間後にまた聞く。
+ */
+function waitingStale() {
+  const lim = addDays(todayStr(), -7);
+  return S.tasks.filter(t => t.gtd === '03-2_連絡待ち' && t.status !== 'Done' && String(t.updated || '').slice(0, 10) <= lim);
+}
+function waitingAskHtml() {
+  const list = waitingStale();
+  if (!list.length) return '';
+  return '<div class="mb-3 rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">' +
+    '<p class="text-xs font-bold text-amber-900">⏳ 連絡待ちのまま1週間たったもの（' + list.length + '件）— もう Done にしますか？</p>' +
+    list.slice(0, 20).map(t => '<div class="mt-1.5 flex items-center gap-2 text-sm">' +
+      '<span class="min-w-0 flex-1 cursor-pointer truncate open-task" data-id="' + esc(t.id) + '">' + esc(t.name) +
+        (t.assignee ? ' <span class="text-[11px] text-slate-500">（' + esc(t.assignee) + '）</span>' : '') + '</span>' +
+      '<button class="wait-done shrink-0 rounded bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white" data-id="' + esc(t.id) + '">Done</button>' +
+      '<button class="wait-keep shrink-0 rounded border border-amber-400 bg-white px-2 py-1 text-[11px]" data-id="' + esc(t.id) + '">まだ待つ</button></div>').join('') +
+  '</div>';
+}
 
 /* =========================================================================
  * 🏠 ホーム：目標を大きく、今日の状況をひと目で
@@ -4060,6 +4319,10 @@ function renderHome() {
   const stat = (label, val, tone, go) => '<button class="home-go rounded-xl bg-white p-3 text-left shadow-sm ring-1 ring-slate-200 hover:ring-slate-400" data-go="' + go + '">' +
     '<p class="text-[11px] text-slate-500">' + label + '</p><p class="text-2xl font-bold ' + tone + '">' + val + '</p></button>';
   $('#homeBody').innerHTML =
+    homeHabitsHtml() +
+    '<div class="mb-3 flex flex-wrap justify-end gap-2"><button class="yn-start rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white">🙋 今日の計画を立てる</button>' +
+      '<button class="pomo-start rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50">🍅 ポモドーロ開始</button></div>' +
+    waitingAskHtml() +
     '<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">' +
       stat('今日の作業量 / 上限', minLabel(load.min) + '<span class="text-sm font-normal text-slate-400"> / ' + minLabel(load.capacity) + '</span>', pct >= 100 ? 'text-rose-600' : 'text-slate-900', 'plan') +
       stat('⛔ 絶対期限が7日以内', hard7.length, hard7.length ? 'text-rose-600' : 'text-slate-900', 'focus') +
@@ -4080,33 +4343,345 @@ function renderHome() {
 function renderNotes() {
   const mode = S.notesMode || 'live';
   const q = searchTerms(S.notesQ || '');
-  const today = todayStr();
-  let list = S.tasks.filter(t => isAreaLike(t.gtd))
-    .filter(t => mode === 'all' ? true : mode === 'day' ? isDayMemo(t) && t.status !== 'Done' : t.status !== 'Done')
+  const arch = mode === 'archive';
+  // 📦 アーカイブは別シート。開いたときに1回だけ取りに行く
+  if (arch && !S.memoArchive) { loadMemoArchive(); }
+  const allMemos = arch ? (S.memoArchive || []) : S.tasks.filter(t => isAreaLike(t.gtd));
+  const inFolder = S.notesProj && S.notesProj !== '__none' ? folderSubtree(S.notesProj) : null;   // フォルダは中のフォルダも含む
+  let list = allMemos
+    .filter(t => arch || mode === 'all' ? true : mode === 'day' ? isDayMemo(t) && t.status !== 'Done' : t.status !== 'Done')
+    .filter(t => !S.notesProj || (S.notesProj === '__none' ? !t.project : !!inFolder[t.project]))
     .filter(t => matchTerms(t.name + SEARCH_SEP + (t.memo || ''), q));
+  // メモがあるフォルダだけを選択肢にする（件数つき・道筋で表示）
+  const pcount = {};
+  allMemos.forEach(t => { if (arch || t.status !== 'Done' || mode === 'all') pcount[t.project || ''] = (pcount[t.project || ''] || 0) + 1; });
+  const projOpts = Object.keys(pcount).map(pid => ({ id: pid, name: pid ? (folderPathStr(pid) || pid) : '（フォルダなし）', n: pcount[pid] }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   // 並び：その日だけのメモ（日付の近い順）→ 常設メモ（更新が新しい順）→ Done は最後
   list.sort((a, b) => (a.status === 'Done') - (b.status === 'Done') || isDayMemo(b) - isDayMemo(a) ||
     (isDayMemo(a) ? String(a.execDate || a.due).localeCompare(String(b.execDate || b.due)) : String(b.updated || '').localeCompare(String(a.updated || ''))));
   const groups = {};
   list.forEach(t => { (groups[t.project || ''] = groups[t.project || ''] || []).push(t); });
+  // Done のメモ（繰り返しなし）はまとめてアーカイブへ送れる
+  const doneMemos = arch ? [] : list.filter(t => t.status === 'Done' && !t.repeatRule);
   $('#notesTools').innerHTML = '<div class="flex flex-wrap items-center gap-2">' +
-    '<input id="notesQ" type="search" class="w-56 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" placeholder="メモを検索（スペースで絞り込み）" value="' + esc(S.notesQ || '') + '">' +
-    [['live', '活きているメモ'], ['day', 'その日だけのメモ'], ['all', 'Done も含む']].map(o =>
+    '<input id="notesQ" type="search" class="w-56 max-w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" placeholder="メモを検索（スペースで絞り込み）" value="' + esc(S.notesQ || '') + '">' +
+    '<select id="notesProj" class="max-w-[14rem] rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"><option value="">📁 すべてのフォルダ</option>' +
+      projOpts.map(o => '<option value="' + esc(o.id || '__none') + '"' + (S.notesProj && (o.id || '__none') === S.notesProj ? ' selected' : '') + '>' + esc(o.name) + '（' + o.n + '）</option>').join('') + '</select>' +
+    [['live', '活きているメモ'], ['day', 'その日だけのメモ'], ['all', 'Done も含む'], ['archive', '📦 アーカイブ']].map(o =>
       '<button class="notes-mode rounded-lg border px-2.5 py-1.5 text-xs ' + (mode === o[0] ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white') + '" data-m="' + o[0] + '">' + o[1] + '</button>').join('') +
-    '<span class="text-[11px] text-slate-400">' + list.length + '件</span></div>';
+    (doneMemos.length ? '<button id="memoArchDone" class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs">📦 Done のメモをアーカイブへ（' + doneMemos.length + '件）</button>' : '') +
+    (arch ? '<button id="memoArchReload" class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs">↻ 読み直す</button>' : '') +
+    '<span class="text-[11px] text-slate-400">' + (arch && !S.memoArchive ? '読み込み中…' : list.length + '件') + '</span></div>';
+
+  const card = t => {
+    const memoHtml = '<p class="text-sm font-semibold ' + (t.status === 'Done' && !arch ? 'text-slate-400 line-through' : 'text-slate-800') + '">' +
+        (isDayMemo(t) ? '<span class="mr-1 rounded bg-rose-100 px-1 text-[10px] font-normal text-rose-700">その日だけ ' + esc((t.execDate || t.due).slice(5)) + '</span>' : '') + esc(t.name) + '</p>' +
+      '<p class="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-600">' + esc(arch ? (t.memo || '') : (t.memo || '').slice(0, 600)) + '</p>';
+    if (arch) {
+      // アーカイブ中のメモは読むだけ（編集は「戻す」してから）。data-id を付けないのは、タップで編集画面が開かないようにするため
+      return '<div class="rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">' + memoHtml +
+        '<div class="mt-2 flex items-center gap-2 text-[10px] text-slate-400"><span>更新 ' + esc(t.updated || '—') + '</span>' +
+        '<button class="memo-restore ml-auto rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50" data-mid="' + esc(t.id) + '">↩ メモ一覧に戻す</button></div></div>';
+    }
+    return '<div class="rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200 hover:ring-slate-400 ' + (t.status === 'Done' ? 'opacity-60' : '') + '">' +
+      '<div class="cursor-pointer open-task" data-id="' + esc(t.id) + '">' + memoHtml + '</div>' +
+      (t.repeatRule ? '' : '<div class="mt-2 flex justify-end"><button class="memo-archive rounded px-2 py-0.5 text-[10px] text-slate-400 hover:bg-slate-100 hover:text-slate-700" data-mid="' + esc(t.id) + '" title="メモアーカイブ（別シート）へ移す。あとで戻せます">📦 しまう</button></div>') +
+    '</div>';
+  };
   $('#notesBody').innerHTML = Object.keys(groups).map(pid => {
-    const p = S.projMap[pid];
-    const sum = (S.memoSummaries || {})[pid];
-    return '<div class="mb-5"><h3 class="mb-1.5 text-sm font-bold text-slate-700">📁 ' + esc(p ? p.name : '（プロジェクトなし）') +
+    const sum = arch ? null : (S.memoSummaries || {})[pid];
+    return '<div class="mb-5"><h3 class="mb-1.5 text-sm font-bold text-slate-700">📁 ' + esc(pid ? (folderPathStr(pid) || '（削除されたフォルダ）') : '（フォルダなし）') +
       ' <span class="text-[11px] font-normal text-slate-400">' + groups[pid].length + '件</span></h3>' +
       (sum ? '<div class="mb-2 rounded-lg bg-slate-50 p-2.5 text-xs leading-relaxed text-slate-700 ring-1 ring-slate-200"><b>🤖 要約</b>（' + esc(sum.at || '') + '）<br>' + esc(sum.text || '') + '</div>' : '') +
-      '<div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">' + groups[pid].map(t =>
-        '<div class="cursor-pointer rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200 hover:ring-slate-400 open-task ' + (t.status === 'Done' ? 'opacity-50' : '') + '" data-id="' + esc(t.id) + '">' +
-          '<p class="text-sm font-semibold ' + (t.status === 'Done' ? 'text-slate-400 line-through' : 'text-slate-800') + '">' +
-            (isDayMemo(t) ? '<span class="mr-1 rounded bg-rose-100 px-1 text-[10px] font-normal text-rose-700">その日だけ ' + esc((t.execDate || t.due).slice(5)) + '</span>' : '') + esc(t.name) + '</p>' +
-          '<p class="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-600">' + esc((t.memo || '').slice(0, 600)) + '</p>' +
-        '</div>').join('') + '</div></div>';
-  }).join('') || '<p class="rounded-xl bg-white p-8 text-center text-sm text-slate-400 ring-1 ring-slate-200">該当するメモはありません</p>';
+      '<div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">' + groups[pid].map(card).join('') + '</div></div>';
+  }).join('') || '<p class="rounded-xl bg-white p-8 text-center text-sm text-slate-400 ring-1 ring-slate-200">' +
+    (arch ? (S.memoArchive ? 'アーカイブしたメモはありません。メモの「📦 しまう」で移せます' : '読み込み中…') : '該当するメモはありません') + '</p>';
+}
+
+/* 🗒 メモのアーカイブ（別シート「メモアーカイブ」）。タスク一覧を軽く保ちつつ、いつでも読み返し・復元できる */
+async function loadMemoArchive() {
+  if (S.memoArchiveLoading) return;
+  S.memoArchiveLoading = true;
+  try { S.memoArchive = await api.getMemoArchive(); }
+  catch (e) { S.memoArchive = []; toast('アーカイブを読み込めませんでした: ' + (e.message || e), 'err'); }
+  finally { S.memoArchiveLoading = false; }
+  if (S.view === 'notes') renderNotes();
+}
+async function archiveMemosUi(ids) {
+  if (!ids.length) return;
+  busy(true, 'アーカイブへ移しています…');
+  try {
+    const r = await api.archiveMemos(ids);
+    const moved = {}; (r.archived || []).forEach(id => { moved[id] = true; });
+    const gone = S.tasks.filter(t => moved[t.id]);
+    S.tasks = S.tasks.filter(t => !moved[t.id]);
+    if (S.memoArchive) S.memoArchive = gone.map(t => Object.assign({}, t, { archived: true })).concat(S.memoArchive);
+    saveCache(); renderNotes();
+    toast('📦 ' + gone.length + '件をアーカイブへ移しました' + ((r.skipped || []).length ? '（' + r.skipped.length + '件は移せませんでした：' + r.skipped[0].reason + '）' : ''));
+  } catch (e) { toast('移せませんでした: ' + (e.message || e), 'err'); }
+  finally { busy(false); }
+}
+async function restoreMemosUi(ids) {
+  busy(true, 'メモ一覧に戻しています…');
+  try {
+    const r = await api.restoreMemos(ids);
+    const back = {}; (r.restored || []).forEach(id => { back[id] = true; });
+    S.memoArchive = (S.memoArchive || []).filter(t => !back[t.id]);
+    const have = {}; S.tasks.forEach(t => { have[t.id] = true; });
+    (r.tasks || []).forEach(t => { if (!have[t.id]) S.tasks.push(t); });
+    saveCache(); renderNotes();
+    toast('↩ ' + (r.restored || []).length + '件をメモ一覧に戻しました');
+  } catch (e) { toast('戻せませんでした: ' + (e.message || e), 'err'); }
+  finally { busy(false); }
+}
+
+/* =========================================================================
+ * 🌱 習慣（2026-10-29 第5便：マイルーティンのような習慣管理）
+ * =========================================================================
+ * ・時間帯（朝・昼・夕方・夜・寝る前・いつでも）ごとに今日の習慣を並べ、✓ で記録
+ * ・やる日は「曜日」か「週◯回」。お休み期間は数えない（連続が途切れない）
+ * ・信号：今日の分が全部できたら🟢、一部🟡、まだ🔴。🟢が続いた日数とバッジ
+ * ・目標の分があれば ▶ でタイマー（右下。終わると自動で ✓）
+ * ・今週・今月の達成率と、習慣ごとの直近7日・連続日数
+ * 記録はサーバーの「習慣」「習慣ログ」シート（人ごと）。画面は先に書き換えて、裏で送る。
+ */
+const HABIT_SLOTS = ['朝', '昼', '夕方', '夜', '寝る前', 'いつでも'];
+const HABIT_SLOT_ICON = { '朝': '🌅', '昼': '☀️', '夕方': '🌇', '夜': '🌙', '寝る前': '🛏', 'いつでも': '🔁' };
+const HABIT_TEMPLATES = [
+  { name: '朝の散歩', slot: '朝', goalMin: 15 }, { name: '水を1杯飲む', slot: '朝', goalMin: 0 },
+  { name: '読書', slot: '夜', goalMin: 10 }, { name: 'ストレッチ', slot: '寝る前', goalMin: 5 },
+  { name: '日記を書く', slot: '寝る前', goalMin: 5 }, { name: '英単語', slot: '昼', goalMin: 10 }
+];
+const HABIT_BADGES = [3, 7, 14, 30, 60, 100, 365];
+
+async function loadHabits(force) {
+  if (S.habitsLoading || (S.habits && !force)) return;
+  S.habitsLoading = true;
+  try { const r = await api.getHabits(400); S.habits = r.habits || []; S.habitLogs = r.logs || []; habitQOverlay(); habitQFlush(); }
+  catch (e) { if (!S.habits) { S.habits = []; S.habitLogs = []; } toast('習慣を読み込めませんでした: ' + (e.message || e), 'err'); }
+  finally { S.habitsLoading = false; }
+  if (S.view === 'habits') renderHabits();
+  else if (S.view === 'home') renderHome();
+}
+function habitLogOf(id, date) { return (S.habitLogs || []).find(x => x.id === id && x.date === date) || null; }
+/** その週の月曜日 */
+function weekMonday(date) { const d = new Date(date + 'T00:00:00').getDay(); return addDays(date, -((d + 6) % 7)); }
+function habitResting(h, date) { return !!(h.restFrom && date >= h.restFrom && (!h.restTo || date <= h.restTo)); }
+/** その日が「やる日」か */
+function habitDue(h, date) {
+  if (!h.active || (h.start && date < h.start) || habitResting(h, date)) return false;
+  if (h.perWeek > 0) {
+    const lg = habitLogOf(h.id, date);
+    if (lg && lg.state === 'done') return true;
+    // 週◯回：その週にすでに回数を満たしていたら、残りの日は「やる日」に数えない
+    let n = 0;
+    for (let d = weekMonday(date); d < date; d = addDays(d, 1)) { const x = habitLogOf(h.id, d); if (x && x.state === 'done') n++; }
+    return n < h.perWeek;
+  }
+  return !h.dow.length || h.dow.indexOf(new Date(date + 'T00:00:00').getDay()) >= 0;
+}
+/** 連続日数：やる日に✓が続いた数（休み＝skip は途切れない。今日まだなら昨日から数える） */
+function habitStreak(h, today) {
+  let n = 0;
+  for (let i = 0, d = today; i < 400; i++, d = addDays(d, -1)) {
+    if (h.start && d < h.start) break;
+    if (!habitDue(h, d)) continue;
+    const lg = habitLogOf(h.id, d);
+    if (lg && lg.state === 'done') n++;
+    else if (lg && lg.state === 'skip') continue;
+    else if (d === today) continue;
+    else break;
+  }
+  return n;
+}
+/** その日の信号 */
+function habitDay(date) {
+  const due = (S.habits || []).filter(h => habitDue(h, date));
+  const done = due.filter(h => { const x = habitLogOf(h.id, date); return x && (x.state === 'done' || x.state === 'skip'); });
+  const light = !due.length ? 'none' : done.length === due.length ? 'green' : done.length ? 'yellow' : 'red';
+  return { due: due, done: done, light: light };
+}
+/** 🟢の日が続いた数（今日がまだ🟢でなければ昨日から） */
+function greenStreak(today) {
+  let n = 0;
+  for (let i = 0, d = today; i < 400; i++, d = addDays(d, -1)) {
+    const st = habitDay(d);
+    if (st.light === 'none') { if (!(S.habits || []).some(h => !h.start || h.start <= d)) break; continue; }
+    if (st.light === 'green') n++;
+    else if (d === today) continue;
+    else break;
+  }
+  return n;
+}
+function habitRate(from, to) {
+  let due = 0, done = 0;
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    (S.habits || []).forEach(h => {
+      if (!habitDue(h, d)) return;
+      const x = habitLogOf(h.id, d);
+      if (x && x.state === 'skip') return;          // 休みは分母にも入れない
+      due++; if (x && x.state === 'done') done++;
+    });
+  }
+  return { due: due, done: done, pct: due ? Math.round(done / due * 100) : null };
+}
+const LIGHT_HTML = { green: '🟢', yellow: '🟡', red: '🔴', none: '⚪' };
+
+/* 習慣の記録の送り待ち（2026-10-30）。電波が無いときに押した ✓ も消さずに端末へ残し、
+   つながったら送る。同じ日・同じ習慣は最後の1つだけ送ればよい（何度押しても最終状態だけ） */
+const HABIT_Q_KEY = 'gtdHabitQ_v1';
+function habitQ() { try { return JSON.parse(localStorage.getItem(HABIT_Q_KEY) || '[]') || []; } catch (e) { return []; } }
+function habitQSave(q) { try { if (q.length) localStorage.setItem(HABIT_Q_KEY, JSON.stringify(q)); else localStorage.removeItem(HABIT_Q_KEY); } catch (e) {} }
+function habitQPut(x) { habitQSave(habitQ().filter(y => !(y.id === x.id && y.date === x.date)).concat([x])); }
+/** 送り待ちを手元の表示に重ねる（サーバーから読み直したあとも、まだ送れていない ✓ を消さない） */
+function habitQOverlay() {
+  habitQ().forEach(x => {
+    S.habitLogs = (S.habitLogs || []).filter(y => !(y.id === x.id && y.date === x.date));
+    if (x.state) S.habitLogs.push({ id: x.id, date: x.date, state: x.state, min: x.min || 0 });
+  });
+}
+let HABIT_Q_BUSY = false;
+async function habitQFlush() {
+  if (HABIT_Q_BUSY) return;
+  const q = habitQ();
+  if (!q.length) return;
+  HABIT_Q_BUSY = true;
+  try {
+    for (const x of q) {
+      try { await api.logHabit(x.date, x.id, x.state, x.min || 0); habitQSave(habitQ().filter(y => !(y.id === x.id && y.date === x.date && y.state === x.state))); }
+      catch (e) {
+        // 「見つかりません」など送り直しても通らないものは捨てる。通信エラーなら次の機会に
+        if (isPermanentError(String(e.message || e))) habitQSave(habitQ().filter(y => !(y.id === x.id && y.date === x.date)));
+        else break;
+      }
+    }
+  } finally { HABIT_Q_BUSY = false; }
+}
+window.addEventListener('online', () => { habitQFlush(); });
+setInterval(() => { if (habitQ().length) habitQFlush(); }, 60000);
+
+async function setHabitLog(id, date, state, min) {
+  S.habitLogs = (S.habitLogs || []).filter(x => !(x.id === id && x.date === date));
+  if (state) S.habitLogs.push({ id: id, date: date, state: state, min: min || 0 });
+  // まず端末に送り待ちとして残してから送る（途中で画面を閉じても記録が消えない）
+  habitQPut({ id: id, date: date, state: state || '', min: min || 0 });
+  renderCurrent();
+  await habitQFlush();
+  if (habitQ().some(x => x.id === id && x.date === date)) toast('🌱 記録は端末に残しました。つながったら送ります', 'warn');
+}
+
+function renderHabits() {
+  if (!S.habits) { loadHabits(); $('#habitsTools').innerHTML = ''; $('#habitsBody').innerHTML = '<p class="py-10 text-center text-sm text-slate-400">読み込み中…</p>'; return; }
+  const today = todayStr();
+  const date = S.habitDate || today;
+  const st = habitDay(date);
+  const gs = greenStreak(today);
+  const week = habitRate(weekMonday(today), today), month = habitRate(today.slice(0, 8) + '01', today);
+  const active = S.habits.filter(h => h.active).sort((a, b) => HABIT_SLOTS.indexOf(a.slot) - HABIT_SLOTS.indexOf(b.slot) || a.order - b.order || a.name.localeCompare(b.name, 'ja'));
+  $('#habitsTools').innerHTML = '<div class="flex flex-wrap items-center gap-2">' +
+    '<button id="hbNew" class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">＋ 習慣を追加</button>' +
+    '<button class="hb-day rounded-lg border px-2.5 py-1.5 text-xs ' + (date === today ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white') + '" data-d="' + today + '">今日</button>' +
+    '<button class="hb-day rounded-lg border px-2.5 py-1.5 text-xs ' + (date === addDays(today, -1) ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white') + '" data-d="' + addDays(today, -1) + '">昨日（つけ忘れ）</button>' +
+    '<span class="text-[11px] text-slate-400">' + active.length + '個</span></div>';
+
+  // スマホでも3つ横に並べる（縦に積むと、肝心の今日の習慣が画面の下に押し出されるため）
+  const got = HABIT_BADGES.filter(b => gs >= b), nextB = HABIT_BADGES.find(b => gs < b);
+  const head = '<div class="grid grid-cols-3 gap-2">' +
+    '<div class="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200"><p class="text-[10px] text-slate-500">' + (date === today ? '今日' : date.slice(5)) + 'の信号</p>' +
+      '<p class="mt-0.5 text-xl font-black sm:text-3xl">' + LIGHT_HTML[st.light] + '<span class="ml-1 text-base tabular-nums sm:text-xl">' + st.done.length + '/' + st.due.length + '</span></p>' +
+      '<p class="text-[10px] text-slate-500">' + (st.light === 'green' ? 'ぜんぶ済み！' : st.light === 'none' ? '習慣なし' : 'あと ' + (st.due.length - st.done.length) + '個') + '</p></div>' +
+    '<div class="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200"><p class="text-[10px] text-slate-500">🟢の連続</p>' +
+      '<p class="mt-0.5 text-xl font-black tabular-nums sm:text-3xl">' + gs + '<span class="text-xs font-bold"> 日</span></p>' +
+      '<p class="truncate text-[10px] text-slate-500" title="' + HABIT_BADGES.map(b => b + '日').join('・') + 'でバッジ">' + (got.length ? '🏅' + got[got.length - 1] + '日達成' : '') + (nextB ? (got.length ? '・' : '') + '次は' + nextB + '日' : '') + '</p></div>' +
+    '<div class="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200"><p class="text-[10px] text-slate-500">達成率（休みは除く）</p>' +
+      '<p class="mt-0.5 text-[11px] text-slate-600">今週 <b class="text-base tabular-nums text-slate-900 sm:text-2xl">' + (week.pct === null ? '—' : week.pct + '%') + '</b></p>' +
+      '<p class="text-[11px] text-slate-600">今月 <b class="text-base tabular-nums text-slate-900 sm:text-2xl">' + (month.pct === null ? '—' : month.pct + '%') + '</b></p></div></div>';
+
+  const days7 = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
+  const row = h => {
+    const lg = habitLogOf(h.id, date);
+    const due = habitDue(h, date);
+    const done = lg && lg.state === 'done', skip = lg && lg.state === 'skip';
+    const strk = habitStreak(h, today);
+    return '<div class="hb-row flex items-center gap-2 rounded-xl bg-white px-3 py-2.5 shadow-sm ring-1 ' + (done ? 'ring-emerald-300' : 'ring-slate-200') + (due || lg ? '' : ' opacity-50') + '">' +
+      '<button class="hb-check flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 text-lg ' +
+        (done ? 'border-emerald-500 bg-emerald-500 text-white' : skip ? 'border-slate-300 bg-slate-100 text-slate-400' : 'border-slate-300 bg-white text-transparent') + '" data-id="' + esc(h.id) + '" aria-label="やった">' + (skip ? '–' : '✓') + '</button>' +
+      '<div class="min-w-0 flex-1">' +
+        '<p class="hb-edit cursor-pointer truncate text-sm font-semibold ' + (done ? 'text-slate-400 line-through' : 'text-slate-800') + '" data-hid="' + esc(h.id) + '">' + esc(h.name) + '</p>' +
+        '<p class="flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">' +
+          (strk ? '<span class="font-semibold text-amber-600">🔥' + strk + '日</span>' : '') +
+          '<span>' + (h.perWeek ? '週' + h.perWeek + '回' : h.dow.length && h.dow.length < 7 ? h.dow.map(n => '日月火水木金土'[n]).join('') : '毎日') + '</span>' +
+          (h.goalMin ? '<span>⏱' + h.goalMin + '分</span>' : '') +
+          (habitResting(h, date) ? '<span class="text-sky-600">お休み中</span>' : !due && !lg ? '<span>今日はやる日ではありません</span>' : '') +
+          '<span class="ml-auto inline-flex gap-0.5" title="直近7日">' + days7.map(d => {
+            const x = habitLogOf(h.id, d), du = habitDue(h, d);
+            const c = x && x.state === 'done' ? 'bg-emerald-500' : x && x.state === 'skip' ? 'bg-slate-300' : du && d < today ? 'bg-rose-200' : du ? 'bg-slate-100 ring-1 ring-slate-300' : 'bg-transparent ring-1 ring-slate-100';
+            return '<i class="inline-block h-2.5 w-2.5 rounded-sm ' + c + '"></i>'; }).join('') + '</span>' +
+        '</p></div>' +
+      (h.goalMin && !done ? '<button class="hb-timer shrink-0 rounded-lg bg-rose-600 px-2 py-1.5 text-[11px] font-semibold text-white" data-id="' + esc(h.id) + '">▶ ' + h.goalMin + '分</button>' : '') +
+      (!done ? '<button class="hb-skip shrink-0 rounded px-1.5 py-1 text-[10px] text-slate-400 hover:bg-slate-100" data-id="' + esc(h.id) + '" title="今日は休む（連続は途切れない）">' + (skip ? '戻す' : '休む') + '</button>' : '') +
+    '</div>';
+  };
+  const groups = HABIT_SLOTS.map(sl => {
+    const list = active.filter(h => h.slot === sl);
+    if (!list.length) return '';
+    return '<div><h3 class="mb-1.5 mt-4 text-xs font-bold text-slate-500">' + HABIT_SLOT_ICON[sl] + ' ' + sl + '</h3><div class="space-y-1.5">' + list.map(row).join('') + '</div></div>';
+  }).join('');
+  const archived = S.habits.filter(h => !h.active);
+  $('#habitsBody').innerHTML = '<div class="mx-auto max-w-3xl">' + head +
+    (groups || '<div class="mt-4 rounded-2xl bg-white p-6 text-center ring-1 ring-slate-200"><p class="text-sm text-slate-600">まだ習慣がありません。小さく始めるのがコツです。</p>' +
+      '<div class="mt-3 flex flex-wrap justify-center gap-1.5">' + HABIT_TEMPLATES.map((t, i) => '<button class="hb-tpl rounded-full border border-emerald-300 px-3 py-1 text-xs text-emerald-800 hover:bg-emerald-50" data-i="' + i + '">' + HABIT_SLOT_ICON[t.slot] + ' ' + esc(t.name) + '</button>').join('') + '</div></div>') +
+    (archived.length ? '<details class="mt-6 text-xs text-slate-500"><summary class="cursor-pointer">しまった習慣（' + archived.length + '）</summary>' +
+      archived.map(h => '<div class="mt-1 flex items-center gap-2"><span class="flex-1">' + esc(h.name) + '</span><button class="hb-revive rounded border border-slate-300 px-2 py-0.5" data-id="' + esc(h.id) + '">再開</button></div>').join('') + '</details>' : '') +
+  '</div>';
+}
+
+function openHabit(id, preset) {
+  const h = id ? (S.habits || []).find(x => x.id === id) : Object.assign({ name: '', slot: '朝', dow: [], perWeek: 0, goalMin: 0, restFrom: '', restTo: '', memo: '' }, preset || {});
+  if (!h) return;
+  $('#hbModal').dataset.id = id || '';
+  $('#hbTitle').textContent = id ? '🌱 習慣を編集' : '🌱 習慣を追加';
+  $('#hbName').value = h.name; $('#hbGoal').value = h.goalMin || ''; $('#hbMemo').value = h.memo || '';
+  $('#hbSlot').innerHTML = HABIT_SLOTS.map(x => '<option' + (x === h.slot ? ' selected' : '') + '>' + x + '</option>').join('');
+  $('#hbDow').innerHTML = [1, 2, 3, 4, 5, 6, 0].map(n => '<label class="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-300 px-2 py-1 text-xs">' +
+    '<input type="checkbox" class="hb-dow" value="' + n + '"' + (!h.dow.length || h.dow.indexOf(n) >= 0 ? ' checked' : '') + '>' + '日月火水木金土'[n] + '</label>').join('');
+  $('#hbPerWeek').value = String(h.perWeek || 0);
+  $('#hbRestFrom').value = h.restFrom || ''; $('#hbRestTo').value = h.restTo || '';
+  $('#hbTemplates').innerHTML = id ? '' : HABIT_TEMPLATES.map((t, i) => '<button type="button" class="hb-tpl2 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] text-emerald-800" data-i="' + i + '">' + esc(t.name) + '</button>').join('');
+  $('#hbArchive').hidden = !id;
+  HDR.show();
+  $('#hbModal').classList.remove('hidden');
+  setTimeout(() => $('#hbName').focus(), 50);
+}
+async function saveHabitUi(extra) {
+  const id = $('#hbModal').dataset.id || '';
+  const dows = $$('.hb-dow:checked').map(c => Number(c.value));
+  const dto = Object.assign({ id: id, name: $('#hbName').value.trim(), slot: $('#hbSlot').value, goalMin: Number($('#hbGoal').value) || 0,
+    dow: dows.length === 7 ? [] : dows, perWeek: Number($('#hbPerWeek').value) || 0,
+    restFrom: $('#hbRestFrom').value, restTo: $('#hbRestTo').value, memo: $('#hbMemo').value }, extra || {});
+  if (!dto.name) { toast('名前を入れてください', 'err'); return; }
+  if (!dto.perWeek && !dows.length) { toast('やる日を1つ以上選ぶか、週の回数を選んでください', 'err'); return; }
+  if (dto.restFrom && dto.restTo && dto.restTo < dto.restFrom) { toast('お休みの「まで」が「から」より前です', 'err'); return; }
+  busy(true, '保存中…');
+  try {
+    const h = await api.saveHabit(dto);
+    S.habits = (S.habits || []).filter(x => x.id !== h.id).concat([h]);
+    $('#hbModal').classList.add('hidden');
+    renderCurrent();
+    toast(extra && extra.active === false ? '「' + h.name + '」をしまいました（記録は残ります）' : '保存しました');
+  } catch (e) { toast('保存できませんでした: ' + (e.message || e), 'err'); }
+  finally { busy(false); }
+}
+
+function homeHabitsHtml() {
+  if (!S.habits) { loadHabits(); return ''; }
+  const st = habitDay(todayStr());
+  if (!st.due.length) return '';
+  return '<button class="home-go mb-3 flex w-full items-center gap-3 rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-slate-200" data-go="habits">' +
+    '<span class="text-2xl">' + LIGHT_HTML[st.light] + '</span><span class="flex-1"><span class="block text-sm font-bold text-slate-800">🌱 今日の習慣 ' + st.done.length + ' / ' + st.due.length + '</span>' +
+    '<span class="block text-[11px] text-slate-500">' + (st.light === 'green' ? 'ぜんぶ済み' : st.due.filter(h => st.done.indexOf(h) < 0).map(h => h.name).slice(0, 4).join('・')) + '</span></span>' +
+    '<span class="text-slate-300">›</span></button>';
 }
 
 /* =========================================================================
@@ -4214,7 +4789,8 @@ function planCandidates(date) {
   }).sort(byScoreDesc);
 }
 
-function buildDayPlan(date) {
+function buildDayPlan(date, opt) {
+  const o = opt || {};
   const cap = capacityCfg();
   const start = hm2m(cap.dayStart || '09:00'), end = hm2m(cap.dayEnd || '18:00');
   // 先に押さえる時間：予定・時間指定タスク
@@ -4236,13 +4812,16 @@ function buildDayPlan(date) {
   const blocks = busy.map(b => ({ s: b.s, e: b.e, kind: b.kind, title: b.title, ref: b.ref }));
   const planned = [], overflow = [], deferred = [];
   let used = 0;
-  planCandidates(date).forEach(t => {
-    if (t.location !== 'どこでも' && t.place && !placeOpenOn(t.place, date)) {
+  // 絶対期限の都合で今日やるしかないものは、上限を超えても必ず入れる（はい／いいえの計画と同じ判定）
+  const force = o.force || (o.list ? {} : mustDoToday(date));
+  let lateAt = end;                                   // 時間内に収まらない「必ずやる」は終業後に並べる
+  (o.list || orderedByDayPlan(date, planCandidates(date))).forEach(t => {
+    if (!force[t.id] && t.location !== 'どこでも' && t.place && !placeOpenOn(t.place, date)) {
       deferred.push({ t: t, why: '📍 ' + ((placesList().find(x => x.id === t.place) || {}).name || '場所') + ' に行かない日' });
       return;
     }
     const need = estOf(t);
-    if (used + need > capacity) { overflow.push(t); return; }
+    if (used + need > capacity && !force[t.id]) { overflow.push(t); return; }
     // 空き時間に順に詰める（入りきらなければ分けて置く）
     let rest = need;
     for (let i = 0; i < free.length && rest > 0; i++) {
@@ -4252,11 +4831,271 @@ function buildDayPlan(date) {
       blocks.push({ s: f.s, e: f.s + take, kind: 'task', title: t.name, ref: t, part: rest !== need || take < rest });
       f.s += take; rest -= take;
     }
+    if (rest > 0 && force[t.id]) {
+      // 絶対期限の都合で今日やるしかないもの：空きが無くても落とさず、終業後に置いて目立たせる
+      blocks.push({ s: lateAt, e: lateAt + rest, kind: 'task', title: t.name, ref: t, part: rest !== need, late: true });
+      lateAt += rest; rest = 0;
+    }
     if (rest > 0) { overflow.push(t); return; }
     used += need; planned.push(t);
   });
   blocks.sort((a, b) => a.s - b.s);
   return { date: date, blocks: blocks, planned: planned, overflow: overflow, deferred: deferred, capacity: capacity, used: used, busyMin: busyMin };
+}
+
+/* =========================================================================
+ * 🙋「今日やる？ はい／いいえ」で今日の計画を立てる（2026-10-29 第5便）
+ * =========================================================================
+ * 1) 必ずやるもの（絶対期限）を先に決める ― ここは質問しない
+ *    ・絶対期限が今日・過ぎている
+ *    ・明日以降の空き時間では、絶対期限までに終わらないもの（下の mustDoToday で計算）
+ * 2) 残りの候補を1件ずつ「今日やる？」と聞く（はい／いいえ／← 戻る）
+ * 3) 必ずやる＋はい を、予定の空き時間に詰めて今日の時間割にする
+ *    AI が使えるなら順番だけ相談できる（AI が必ずやるを落としても、画面側で入れ直す）
+ * 4) 確定すると実行日を今日にし、並び順を保存（計画タブの時間割にもその順で出る）
+ */
+const YN_MAX = 30;                // 1回に聞く数の上限（多すぎると答えるのが負担になる）
+
+/** その日のうちに手を付けないと絶対期限に間に合わないタスク → { id: 理由 } */
+function mustDoToday(date) {
+  const out = {};
+  const open = S.tasks.filter(t => t.status !== 'Done' && !isAreaLike(t.gtd) && t.hardDue && !(t.hasTime && t.execDate === date));
+  open.forEach(t => { if (t.hardDue <= date) out[t.id] = t.hardDue < date ? '⛔ 絶対期限を過ぎています（' + t.hardDue.slice(5) + '）' : '⛔ 絶対期限が今日'; });
+  // 明日以降の空き（1日の上限−予定）を、絶対期限の早い順に積み上げて足りるか確かめる。
+  // 足りない所まで来たら、それより前の期限のものは「今日始めないと間に合わない」
+  const later = open.filter(t => !out[t.id] && t.hardDue <= addDays(date, 14)).sort((a, b) => a.hardDue.localeCompare(b.hardDue));
+  let need = 0;
+  const capOf = {};                                   // 日ごとの空きは1回だけ計算する（タスクが多いと重いため）
+  const cap1 = d => (capOf[d] === undefined ? (capOf[d] = dayLoad(d).capacity) : capOf[d]);
+  for (let i = 0; i < later.length; i++) {
+    need += estOf(later[i]);
+    let avail = 0;
+    for (let d = addDays(date, 1); d <= later[i].hardDue; d = addDays(d, 1)) avail += cap1(d);
+    if (need > avail) {
+      for (let j = 0; j <= i; j++) if (!out[later[j].id])
+        out[later[j].id] = '⏳ 明日からの空き ' + minLabel(avail) + ' では、⛔' + later[i].hardDue.slice(5) + ' までの分（' + minLabel(need) + '）が終わらない';
+    }
+  }
+  return out;
+}
+
+/** 「今日やる？」と聞く候補（必ずやる・時間指定は除く）。並びは今の並び順どおり */
+function ynCandidates(date, must) {
+  const base = planCandidates(date);
+  const seen = {}; base.forEach(t => { seen[t.id] = true; });
+  // 日付が無くても「今すぐやる」「ASAP」「重要度 高」は聞く
+  S.tasks.forEach(t => {
+    if (seen[t.id] || t.status === 'Done' || isAreaLike(t.gtd) || t.execDate || t.hasTime) return;
+    if (t.gtd === '01-1_今すぐやる' || t.asap === 'ASAP' || t.importance === '高') { base.push(t); seen[t.id] = true; }
+  });
+  return base.filter(t => !must[t.id]).sort(byScoreDesc).slice(0, YN_MAX);
+}
+
+function startYnPlan(date) {
+  const d = date || todayStr();
+  const must = mustDoToday(d);
+  S.yn = { date: d, must: must, queue: ynCandidates(d, must).map(t => t.id), idx: 0, ans: {}, step: 'ask', ai: null, pushNo: false };
+  S.planMode = 'day'; S.planDate = d;
+  if (S.view !== 'plan') switchView('plan'); else renderPlan();
+  window.scrollTo(0, 0);
+}
+
+/** 選んだ分（必ずやる＋はい）を、必ずやる→はいの順に並べたもの */
+function ynChosen() {
+  const Y = S.yn;
+  const byId = id => S.tasks.find(t => t.id === id);
+  const must = Object.keys(Y.must).map(byId).filter(Boolean).sort((a, b) => String(a.hardDue).localeCompare(String(b.hardDue)));
+  const yes = Y.queue.filter(id => Y.ans[id] === 'yes').map(byId).filter(Boolean);
+  let list = must.concat(yes);
+  if (Y.ai && Y.ai.order.length) {
+    // AI の順番を使う。AI が落としたものは後ろに足す（必ずやるは落とさない）
+    const pos = {}; Y.ai.order.forEach((id, i) => { pos[id] = i; });
+    list = list.slice().sort((a, b) => (pos[a.id] === undefined ? 1e6 : pos[a.id]) - (pos[b.id] === undefined ? 1e6 : pos[b.id]));
+  }
+  return list;
+}
+
+function renderYn() {
+  const Y = S.yn;
+  const cap = buildDayPlan(Y.date, { list: [] }).capacity;
+  const mustList = Object.keys(Y.must).map(id => S.tasks.find(t => t.id === id)).filter(Boolean);
+  const chosenMin = ynChosen().reduce((a, t) => a + estOf(t), 0);
+  const pct = cap ? Math.min(100, Math.round(chosenMin / cap * 100)) : 100;
+  const meter = '<div class="rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">' +
+    '<div class="flex flex-wrap items-baseline gap-2"><p class="text-sm font-bold">🙋 ' + Y.date + '（' + DOW_FULL[new Date(Y.date + 'T00:00:00').getDay()] + '）の計画</p>' +
+    '<span class="text-xs ' + (chosenMin > cap ? 'text-rose-600' : 'text-slate-500') + '">選んだ作業 ' + minLabel(chosenMin) + ' / 使える時間 ' + minLabel(cap) + '</span>' +
+    '<button id="ynQuit" class="ml-auto rounded px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-100">やめる</button></div>' +
+    '<div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-100"><div class="h-full ' + (chosenMin > cap ? 'bg-rose-500' : 'bg-emerald-500') + '" style="width:' + pct + '%"></div></div></div>';
+  const mustHtml = mustList.length ? '<details class="rounded-xl bg-rose-50 p-3 ring-1 ring-rose-200"' + (Y.step === 'ask' && Y.idx === 0 ? ' open' : '') + '>' +
+    '<summary class="cursor-pointer text-xs font-bold text-rose-800">⛔ 必ずやる（質問しません）' + mustList.length + '件・' + minLabel(mustList.reduce((a, t) => a + estOf(t), 0)) + '</summary>' +
+    mustList.map(t => '<div class="mt-1.5 text-xs"><span class="cursor-pointer font-semibold text-slate-800 open-task" data-id="' + esc(t.id) + '">' + esc(t.name) + '</span>' +
+      '<span class="ml-1 text-slate-400">' + minLabel(estOf(t)) + '</span><br><span class="text-[11px] text-rose-700">' + esc(Y.must[t.id]) + '</span></div>').join('') + '</details>' : '';
+
+  if (Y.step === 'ask' && Y.idx < Y.queue.length) {
+    const t = S.tasks.find(x => x.id === Y.queue[Y.idx]);
+    if (!t) { Y.idx++; renderYn(); return; }
+    const card = '<div class="yn-card rounded-2xl bg-white p-5 shadow-md ring-1 ring-slate-200">' +
+      '<div class="flex items-center gap-2"><p class="min-w-0 flex-1 truncate text-[11px] text-slate-400">' + (Y.idx + 1) + ' / ' + Y.queue.length + '　' + esc(rankLabel(t)) + '</p>' +
+        '<button id="ynBack" class="shrink-0 rounded px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-100 disabled:opacity-30"' + (Y.idx ? '' : ' disabled') + '>← 1つ前</button></div>' +
+      '<p class="mt-1 text-xl font-black leading-snug text-slate-900">' + esc(t.name) + '</p>' +
+      (t.project ? '<p class="mt-0.5 text-[11px] text-slate-500">📁 ' + esc(folderPathStr(t.project)) + '</p>' : '') +
+      '<div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">' +
+        '<span>⏱ ' + minLabel(estOf(t)) + (t.estMin === '' || t.estMin === undefined ? '（仮）' : '') + '</span>' +
+        (t.hardDue ? '<span class="font-semibold text-rose-700">⛔ ' + t.hardDue + '</span>' : '') +
+        (t.due ? '<span>🎯 ' + t.due + '</span>' : '') +
+        (t.execDate ? '<span>実行日 ' + t.execDate + '</span>' : '') +
+        (t.asap === 'ASAP' ? '<span>⚡ASAP</span>' : '') + (t.importance === '高' ? '<span>🚩重要</span>' : '') +
+      '</div>' +
+      ((t.memo || '').trim() ? '<p class="mt-2 line-clamp-3 whitespace-pre-wrap text-xs text-slate-500">' + esc(t.memo.slice(0, 200)) + '</p>' : '') +
+      '<p class="mt-4 text-center text-sm font-bold text-slate-700">今日やる？</p>' +
+      '<div class="mt-2 grid grid-cols-2 gap-2">' +
+        '<button class="yn-ans rounded-xl border border-slate-300 bg-white py-3 text-base font-bold text-slate-700" data-a="no">いいえ</button>' +
+        '<button class="yn-ans rounded-xl bg-emerald-600 py-3 text-base font-bold text-white" data-a="yes">はい</button>' +
+      '</div>' +
+      (estOf(t) + chosenMin > cap ? '<p class="mt-2 text-center text-[11px] text-rose-600">「はい」にすると使える時間を超えます</p>' : '') +
+      // 右下の＋ボタンと重ならないよう、横いっぱいのボタンにして下に置く
+      '<button id="ynFinish" class="mt-2 w-full rounded-xl border border-indigo-200 py-2 text-xs text-indigo-700 hover:bg-indigo-50">残りは聞かずに、ここまでで計画する →</button>' +
+      '</div>';
+    $('#planBody').innerHTML = '<div class="mx-auto max-w-xl space-y-3">' + meter + mustHtml + card + '</div>';
+    return;
+  }
+
+  // ---- 結果：時間割 ----
+  Y.step = 'result';
+  const list = ynChosen();
+  const force = {}; Object.keys(Y.must).forEach(id => { force[id] = true; });
+  const P = buildDayPlan(Y.date, { list: list, force: force });
+  const noPast = Y.queue.filter(id => Y.ans[id] === 'no').map(id => S.tasks.find(t => t.id === id))
+    .filter(t => t && t.execDate && t.execDate <= Y.date);
+  const blockHtml = b => '<div class="flex items-stretch gap-2 py-1">' +
+    '<span class="w-24 shrink-0 font-mono text-[11px] tabular-nums text-slate-500">' + m2hm(b.s) + '–' + m2hm(b.e) + '</span>' +
+    '<div class="min-w-0 flex-1 rounded-lg px-2.5 py-1.5 text-xs ' +
+      (b.kind === 'event' ? 'bg-slate-900 text-white' : b.kind === 'timed' ? 'bg-sky-50 ring-1 ring-sky-300' : force[b.ref.id] ? 'bg-rose-50 ring-1 ring-rose-300' : 'bg-white ring-1 ring-slate-300') + '">' +
+      (b.kind === 'event' ? '📅 ' : b.kind === 'timed' ? '⏰ ' : force[b.ref.id] ? '⛔ ' : '') + esc(b.title) +
+      (b.part ? ' <span class="text-[10px] text-slate-400">（分割）</span>' : '') +
+      (b.late ? ' <span class="rounded bg-rose-100 px-1 text-[10px] text-rose-700">時間外</span>' : '') + '</div></div>';
+  $('#planBody').innerHTML = '<div class="mx-auto max-w-xl space-y-3">' + meter + mustHtml +
+    '<div class="rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">' +
+      '<p class="text-sm font-bold">🗓 今日の時間割</p>' +
+      (Y.ai && Y.ai.comment ? '<p class="mt-1 rounded-lg bg-indigo-50 p-2 text-xs leading-relaxed text-indigo-900">🤖 ' + esc(Y.ai.comment) + '</p>' : '') +
+      '<div class="mt-2">' + (P.blocks.map(blockHtml).join('') || '<p class="py-6 text-center text-xs text-slate-400">今日入れるものはありません</p>') + '</div>' +
+      (P.overflow.length ? '<p class="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">入りきらなかったもの（' + P.overflow.length + '件）：' +
+        P.overflow.map(t => esc(t.name)).join('、') + '<br><span class="text-[11px]">そのままなら実行日は変えません。</span>' +
+        '<br><button class="resched-go mt-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white" data-date="' + esc(Y.date) + '" data-yn="1">📆 空いている日へ振り分ける</button><span id="reschedOut" class="block"></span></p>' : '') +
+      (noPast.length ? '<label class="mt-2 flex items-start gap-2 text-xs text-slate-600"><input id="ynPushNo" type="checkbox" class="mt-0.5"' + (Y.pushNo ? ' checked' : '') + '>' +
+        '<span>「いいえ」にした中で実行日が今日以前の ' + noPast.length + '件は、実行日を明日にする</span></label>' : '') +
+      '<div class="mt-3 flex flex-wrap gap-2">' +
+        '<button id="ynCommit" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">この計画で確定</button>' +
+        (S.aiEnabled ? '<button id="ynAi" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs">🤖 順番をAIに相談</button>' : '') +
+        '<button id="ynRedo" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs">はい／いいえをやり直す</button>' +
+      '</div></div></div>';
+}
+
+async function ynAskAi() {
+  const Y = S.yn;
+  const list = ynChosen();
+  const k = {}; const back = {};
+  list.forEach((t, i) => { k[t.id] = 't' + (i + 1); back['t' + (i + 1)] = t.id; });
+  // AI に渡すのは仮の番号と要点だけ。AI連携を外したフォルダのタスクは名前も伏せる
+  const hide = t => t.project && S.projMap[t.project] && S.projMap[t.project].aiEnabled === false;
+  const cap = capacityCfg();
+  const P = buildDayPlan(Y.date, { list: [] });
+  const payload = {
+    tasks: list.map(t => ({ k: k[t.id], name: hide(t) ? '（非公開のタスク）' : t.name, est: estOf(t), hardDue: t.hardDue || '', due: t.due || '',
+      must: !!Y.must[t.id], imp: t.importance || '', asap: t.asap === 'ASAP', gtd: gtdShort(t.gtd) })),
+    events: P.blocks.filter(b => b.kind !== 'task').map(b => m2hm(b.s) + '-' + m2hm(b.e) + ' ' + b.title),
+    capacityMin: P.capacity, dayStart: cap.dayStart || '09:00', dayEnd: cap.dayEnd || '18:00'
+  };
+  busy(true, '🤖 今日の順番を考えています…');
+  try {
+    const r = await api.aiDayOrder(Y.date, payload);
+    Y.ai = { order: (r.order || []).map(x => back[x]).filter(Boolean), comment: r.comment || '' };
+    renderYn();
+  } catch (e) { toast('AIに相談できませんでした: ' + (e.message || e), 'err'); }
+  finally { busy(false); }
+}
+
+function ynCommit() {
+  const Y = S.yn;
+  const list = ynChosen();
+  const force = {}; Object.keys(Y.must).forEach(id => { force[id] = true; });
+  const P = buildDayPlan(Y.date, { list: list, force: force });
+  const inPlan = {}; P.blocks.forEach(b => { if (b.kind === 'task') inPlan[b.ref.id] = true; });
+  let n = 0, pushed = 0;
+  list.forEach(t => { if (inPlan[t.id] && t.execDate !== Y.date) { t.execDate = Y.date; localSave(t); n++; } });
+  if (Y.pushNo) {
+    const tomorrow = addDays(Y.date, 1);
+    Y.queue.forEach(id => {
+      const t = S.tasks.find(x => x.id === id);
+      if (Y.ans[id] === 'no' && t && t.execDate && t.execDate <= Y.date) { t.execDate = tomorrow; localSave(t); pushed++; }
+    });
+  }
+  // 並び順を保存（計画タブの時間割がこの順になる。端末をまたいでも同じ）
+  const order = list.filter(t => inPlan[t.id]).map(t => t.id);
+  S.userState = S.userState || {};
+  S.userState.dayOrder = { date: Y.date, ids: order };
+  api.saveUserState({ dayOrder: S.userState.dayOrder }).catch(() => {});
+  saveCache();
+  S.yn = null;
+  renderCurrent();
+  toast('🙋 今日の計画を確定しました（実行日を今日にしたもの ' + n + '件' + (pushed ? '・明日へ送ったもの ' + pushed + '件' : '') + '）');
+}
+
+/** 確定した並び順があれば、その順を先頭に（残りは今の並び順のまま後ろ） */
+function orderedByDayPlan(date, list) {
+  const o = S.userState && S.userState.dayOrder;
+  if (!o || o.date !== date || !Array.isArray(o.ids)) return list;
+  const pos = {}; o.ids.forEach((id, i) => { pos[id] = i; });
+  return list.slice().sort((a, b) => (pos[a.id] === undefined ? 1e6 : pos[a.id]) - (pos[b.id] === undefined ? 1e6 : pos[b.id]));
+}
+
+/* =========================================================================
+ * 📆 リスケ：入りきらないタスクを、空いている日へまとめて振り分ける（2026-10-30）
+ * =========================================================================
+ * 秘書機能の「リスケまで任せたい」の第一歩。AI は使わず、決まった手順で提案する：
+ *   ・並び順の上のものから、翌日以降で「1日の上限 − 予定 − すでに入っている作業」に収まる最初の日へ
+ *   ・絶対期限があるものは、その日までに置く。置けなければ「⚠ 間に合わない」として動かさない
+ *   ・場所が必要なものは、その場所へ行く日だけ
+ *   ・最大14日先まで
+ * いきなり書き換えず、一覧で見せて「この内容で振り分ける」で確定する。
+ */
+function reschedProposal(date, tasks) {
+  const used = {};                                      // 提案の中で足した分（日ごと）
+  const free = d => { const L = dayLoad(d); return L.capacity - L.min - (used[d] || 0); };
+  return tasks.slice().sort(byScoreDesc).map(t => {
+    const need = estOf(t);
+    const limit = [t.hardDue, addDays(date, 14)].filter(Boolean).sort()[0];
+    for (let d = addDays(date, 1); d <= limit; d = addDays(d, 1)) {
+      if (t.location !== 'どこでも' && t.place && !placeOpenOn(t.place, d)) continue;
+      if (free(d) >= need) { used[d] = (used[d] || 0) + need; return { t: t, to: d }; }
+    }
+    return { t: t, to: '', warn: t.hardDue && t.hardDue <= addDays(date, 14) ? '⚠ 絶対期限 ' + t.hardDue.slice(5) + ' までに空きがありません' : '14日先まで空きがありません' };
+  });
+}
+function renderReschedOut(date, fromYn) {
+  const P = fromYn && S.yn ? buildDayPlan(S.yn.date, { list: ynChosen(), force: (function () { const f = {}; Object.keys(S.yn.must).forEach(id => { f[id] = true; }); return f; })() })
+                            : buildDayPlan(date);
+  const items = reschedProposal(date, P.overflow);
+  S.resched = { date: date, items: items.filter(x => x.to).map(x => ({ id: x.t.id, to: x.to })) };
+  const el = $('#reschedOut');
+  if (!el) return;
+  el.innerHTML = '<div class="mt-1 rounded-lg bg-white p-2 ring-1 ring-amber-200">' +
+    items.map(x => '<div class="flex items-center gap-2 py-0.5 text-xs"><span class="min-w-0 flex-1 truncate">' + esc(x.t.name) + '</span>' +
+      (x.to ? '<span class="shrink-0 font-semibold text-slate-700">→ ' + x.to.slice(5) + '（' + DOW_FULL[new Date(x.to + 'T00:00:00').getDay()] + '）</span>'
+            : '<span class="shrink-0 text-[10px] text-rose-700">' + esc(x.warn) + '</span>') + '</div>').join('') +
+    (S.resched.items.length ? '<button class="resched-ok mt-1.5 w-full rounded-lg bg-slate-900 py-1.5 text-xs font-semibold text-white">この内容で振り分ける（' + S.resched.items.length + '件）</button>' : '') +
+  '</div>';
+}
+function applyResched() {
+  const R = S.resched;
+  if (!R || !R.items.length) return;
+  let n = 0;
+  R.items.forEach(x => { const t = S.tasks.find(y => y.id === x.id); if (t && t.execDate !== x.to) { t.execDate = x.to; localSave(t); n++; } });
+  // はい／いいえの途中なら、振り分けたものは今日の分から外す（「別の日にやる」と決めたのと同じ）
+  if (S.yn) R.items.forEach(x => { if (S.yn.ans[x.id] === 'yes') S.yn.ans[x.id] = 'no'; });
+  S.resched = null;
+  renderCurrent();
+  toast('📆 ' + n + '件の実行日を振り分けました');
 }
 
 /** 大きいタスクの早期警告：期限までの空き容量に対して作業量が重いもの */
@@ -4292,9 +5131,11 @@ function renderPlan() {
       return '<button class="plan-go rounded-lg border px-3 py-1.5 text-xs ' + (on ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white') + '" data-v="' + o[0] + '">' + o[1] + '</button>';
     }).join('') +
     '<input id="planDate" type="date" class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs" value="' + esc(date) + '">' +
-    '<button id="btnSchNew" class="ml-auto rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">＋ 予定を入れる</button>' +
+    '<button class="yn-start ml-auto rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white" data-date="' + esc(mode === 'day' ? date : today) + '">🙋 はい／いいえで計画</button>' +
+    '<button id="btnSchNew" class="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white">＋ 予定を入れる</button>' +
     '<button data-open-cfg="plan" class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs">上限の設定</button></div>';
 
+  if (S.yn && mode === 'day') { renderYn(); return; }
   if (mode === 'week') { renderPlanWeek(); return; }
   const P = buildDayPlan(date);
   const pct = P.capacity ? Math.min(100, Math.round(P.used / P.capacity * 100)) : 100;
@@ -4307,9 +5148,10 @@ function renderPlan() {
       (b.kind !== 'event' ? ' data-id="' + esc(b.ref.id) + '"' : '') + '>' +
       (b.kind === 'event' ? '📅 ' : b.kind === 'timed' ? '⏰ ' : '') + esc(b.title) +
       (b.kind === 'task' && b.ref.hardDue ? ' <span class="text-rose-600">⛔' + b.ref.hardDue.slice(5) + '</span>' : '') +
-      (b.part ? ' <span class="text-[10px] text-slate-400">（分割）</span>' : '') + '</div></div>';
+      (b.part ? ' <span class="text-[10px] text-slate-400">（分割）</span>' : '') +
+      (b.late ? ' <span class="rounded bg-rose-100 px-1 text-[10px] text-rose-700">時間外</span>' : '') + '</div></div>';
   $('#planBody').innerHTML =
-    '<div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">' +
+    '<div class="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">' +
     '<div>' +
       '<div class="rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">' +
         '<div class="flex flex-wrap items-baseline gap-2"><p class="text-sm font-bold">' + date + '（' + DOW_FULL[new Date(date + 'T00:00:00').getDay()] + '）のプラン</p>' +
@@ -4325,6 +5167,8 @@ function renderPlan() {
       '</div>' +
       (P.overflow.length ? '<div class="mt-3 rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200"><p class="text-xs font-bold text-amber-900">⚠ 上限を超えるため、この日には入りきらないタスク（' + P.overflow.length + '件）</p>' +
         '<p class="mb-1 text-[11px] text-amber-800">明日以降に回すか、本当に今日必要か見直してください。</p>' +
+        '<button class="resched-go mb-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white" data-date="' + esc(date) + '">📆 まとめて空いている日へ振り分ける</button>' +
+        '<div id="reschedOut"></div>' +
         P.overflow.map(t => '<div class="flex items-center gap-2 py-0.5 text-xs"><span class="min-w-0 flex-1 cursor-pointer truncate open-task" data-id="' + esc(t.id) + '">' + esc(t.name) + '</span>' +
           '<span class="text-[10px] text-amber-700">' + minLabel(estOf(t)) + '</span>' +
           '<button class="plan-move rounded border border-amber-400 bg-white px-1.5 py-0.5 text-[10px]" data-id="' + esc(t.id) + '" data-d="' + addDays(date, 1) + '">翌日へ</button></div>').join('') + '</div>' : '') +
@@ -4347,7 +5191,7 @@ function renderPlan() {
 function renderPlanWeek() {
   const today = todayStr();
   const days = Array.from({ length: 7 }, (_, i) => addDays(today, i));
-  $('#planBody').innerHTML = '<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-7">' + days.map(d => {
+  $('#planBody').innerHTML = '<div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-7">' + days.map(d => {
     const P = buildDayPlan(d);
     const load = P.planned.reduce((a, t) => a + estOf(t), 0) + P.overflow.reduce((a, t) => a + estOf(t), 0);
     const pct = P.capacity ? Math.round(load / P.capacity * 100) : 100;
@@ -4480,8 +5324,7 @@ function actButtons(t, size) {
   // 🤖：担当AIに預ける（週1回まとめて回答）。預け済みなら印だけ出す
   const ai = t.status === 'Done' ? '' : (t.aiFlag === 'queued'
     ? '<span class="shrink-0 rounded bg-violet-50 ' + pad + ' text-violet-600" title="担当AIに依頼中">🤖待</span>'
-    : '<button class="task-act act-btn shrink-0 rounded border border-violet-200 bg-white ' + pad + ' text-violet-700 hover:bg-violet-50" ' +
-      'data-id="' + esc(t.id) + '" data-act="ai" title="AIに任せる（週1回まとめて回答）">🤖</button>');
+    : '');   // 一覧の 🤖（AIに任せる）は誤って押しやすいので廃止（2026-10）
   // 「共有する：…」タスク（毎週の共有PDF）には、その場で送れる共有ボタンを付ける
   const firstUrl = (splitAttach(t.attach || '')[0] || {}).url;
   const share = /^共有する/.test(t.name || '') && firstUrl
@@ -4670,7 +5513,7 @@ function renderGantt() {
   // グループ化
   const groups = {};
   list.forEach(t => {
-    const key = groupBy === 'project' ? (S.projMap[t.project] ? S.projMap[t.project].name : '（プロジェクトなし）')
+    const key = groupBy === 'project' ? (S.projMap[t.project] ? folderPathStr(t.project) : '（フォルダなし）')
               : groupBy === 'gtd' ? (t.gtd || '（種別なし）') : 'すべて';
     (groups[key] = groups[key] || []).push(t);
   });
@@ -4680,6 +5523,7 @@ function renderGantt() {
   const dls = SHOW.deadline ? ganttDeadlines(start, end, gcat) : [];
   const projByName = {};
   S.projects.forEach(p => { projByName[p.name] = p; });
+  S.projects.forEach(p => { projByName[folderPathStr(p.id)] = p; });     // グループ名はフォルダの道筋
 
   let rows = '';
   Object.keys(groups).sort().forEach(g => {
@@ -4761,6 +5605,9 @@ function renderGanttCatFilter() {
   const sel = S.f.__gcat || (S.f.__gcat = []);
   const box = $('#ganttProjCat');
   if (!box) return;
+  // 分類は 2026-10-29 に廃止（フォルダで絞る）。以前の選択が残っていたら外して隠す
+  if (sel.length) sel.length = 0;
+  box.hidden = true; box.classList.add('hidden'); return;
   const btn = box.querySelector('.ms-btn');
   btn.textContent = 'プロジェクト分類：' + (sel.length ? sel.length + '件' : '全て') + ' ▾';
   btn.className = 'ms-btn rounded-lg border px-2 py-1.5 text-xs ' +
@@ -4935,9 +5782,17 @@ function memoCard(t) {
  * =======================================================================*/
 /* ---- 高速連続処理フロー（モーダルを開かずに1件ずつ設定して次へ） ---- */
 /** Inbox整理の対象：GTD種別=00_INBOX かつ 未完了 かつ 実行日が空欄 */
-function isUnsorted(t) {
-  return t.gtd === '00_INBOX' && t.status !== 'Done' && !t.execDate;
+/**
+ * INBOX整理の対象（2026-10 変更）
+ * 既定は「GTD種別がINBOX かつ ステータスが Done 以外」。以前は「実行日が空」も条件で、
+ * 実行日だけ入ったINBOXが整理から漏れていた。⚙設定 →「🧭 タブ/表示」の条件式で自由に変えられる。
+ */
+const INBOX_COND_DEFAULT = { g: 'and', items: [{ f: 'gtd', op: 'in', v: ['00_INBOX'] }, { f: 'status', op: 'nin', v: ['Done'] }] };
+function inboxCond() {
+  const c = S.settings && S.settings.inboxCond;
+  return c && c.g && (c.items || []).length ? c : INBOX_COND_DEFAULT;
 }
+function isUnsorted(t) { return evalCond(t, inboxCond()); }
 
 /** 登録日時（無ければ最古として扱い、必ず整理対象に含める） */
 function taskCreated(t) { return String((t && t.created) || ''); }
@@ -4992,7 +5847,7 @@ function quickBtn(cls, val, label, active, extra) {
 function projSuggestMatches(q, currentId) {
   const terms = searchTerms(q);
   if (!terms.length) return [];
-  return S.projects.filter(p => matchTerms(p.name, terms) || p.id === currentId).slice(0, 30);
+  return S.projects.filter(p => matchTerms(folderPath(p.id).join(SEARCH_SEP), terms) || p.id === currentId).slice(0, 30);
 }
 
 function renderProjHits(hitsSel, selSel, q) {
@@ -5006,7 +5861,7 @@ function renderProjHits(hitsSel, selSel, q) {
   box.innerHTML = (list.length
     ? list.map(p => '<button type="button" class="pj-hit block w-full truncate px-2 py-1.5 text-left text-xs hover:bg-indigo-50 ' +
         (p.id === cur ? 'bg-indigo-50 font-medium text-indigo-700' : 'text-slate-700') +
-        '" data-id="' + esc(p.id) + '" data-sel="' + esc(selSel) + '" data-hits="' + esc(hitsSel) + '">' + esc(p.name) + '</button>').join('')
+        '" data-id="' + esc(p.id) + '" data-sel="' + esc(selSel) + '" data-hits="' + esc(hitsSel) + '">' + esc(folderPathStr(p.id)) + '</button>').join('')
     : '') + newProjRow(q, 'task', list.length);
 }
 
@@ -5024,19 +5879,20 @@ function newProjRow(q, from, hitCount) {
     (strong ? 'bg-indigo-50 font-medium text-indigo-700 hover:bg-indigo-100'
             : 'border-t border-slate-100 text-indigo-600 hover:bg-indigo-50') +
     '" data-name="' + esc(name) + '" data-from="' + esc(from) + '">' +
-    (strong ? '一致なし — ' : '') + '＋「' + esc(name) + '」を新規プロジェクトとして作成</button>';
+    (strong ? '一致なし — ' : '') + '＋「' + esc(name) + '」を新しいフォルダとして作成</button>';
 }
 
 /** Inbox整理：検索語に一致するプロジェクト（選択中のものは常に含める） */
 function flowProjMatches(d) {
   const terms = searchTerms(S.flowProjQ || '');
-  if (!terms.length) return S.projects.slice(0, 40);
-  return S.projects.filter(p => matchTerms(p.name, terms) || p.id === (d && d.project)).slice(0, 40);
+  const sel = d && d.project ? S.projects.filter(p => p.id === d.project) : [];   // 選択中は常に候補に残す（消えると選択まで外れていた）
+  if (!terms.length) return sel.concat(S.projects.filter(p => p.id !== (d && d.project)).slice(0, 40));
+  return S.projects.filter(p => matchTerms(folderPath(p.id).join(SEARCH_SEP), terms) || p.id === (d && d.project)).slice(0, 40);
 }
 
 function flowProjOptions(d) {
   return flowProjMatches(d).map(p =>
-    '<option value="' + esc(p.id) + '"' + ((d && d.project) === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('');
+    '<option value="' + esc(p.id) + '"' + ((d && d.project) === p.id ? ' selected' : '') + '>' + esc(folderPathStr(p.id)) + '</option>').join('');
 }
 
 function flowProjHits(d) {
@@ -5045,7 +5901,7 @@ function flowProjHits(d) {
   return list.slice(0, 12).map(p =>
     '<button type="button" class="fl-proj block w-full truncate px-2 py-1.5 text-left text-xs hover:bg-indigo-50 ' +
       ((d && d.project) === p.id ? 'bg-indigo-50 font-medium text-indigo-700' : 'text-slate-700') + '" ' +
-      'data-id="' + esc(p.id) + '">' + esc(p.name) + '</button>').join('') +
+      'data-id="' + esc(p.id) + '">' + esc(folderPathStr(p.id)) + '</button>').join('') +
     newProjRow(S.flowProjQ, 'flow', list.length);
 }
 
@@ -5069,6 +5925,30 @@ function syncFlowInputs() {
   const st = v('flowStart');         if (st !== null) d.startTime = st;
   const en = v('flowEnd');           if (en !== null) d.endTime = en;
   const rn = v('flowRepeatNum');     if (rn !== null) d.repeatNum = rn === '' ? '' : Number(rn);
+  const as = v('flowAssignee');      if (as !== null) d.assignee = as;
+}
+
+/* ---- 高速整理：いま表示しているタスク・1つ前に戻る・今日処理した分 ---- */
+const CONTACT_GTD = ['03-1_連絡する・依頼する', '03-2_連絡待ち'];
+const isContactGtd = g => CONTACT_GTD.indexOf(String(g || '')) >= 0;
+/** いま表示するタスク。「1つ前に戻る」で呼び戻したものがあればそれを優先 */
+function flowCurrent() {
+  if (S.flowBackId) {
+    const b = S.tasks.find(x => x.id === S.flowBackId);
+    if (b) return b;
+    S.flowBackId = null;
+  }
+  return flowQueue()[0] || null;
+}
+/** 今日この端末で整理したタスク（日付が変わったら空にする） */
+const FLOW_LOG_KEY = 'gtdFlowLog_v1';
+function flowLog() {
+  try { const o = JSON.parse(localStorage.getItem(FLOW_LOG_KEY) || 'null'); if (o && o.date === todayStr()) return o.ids || []; } catch (e) {}
+  return [];
+}
+function flowLogAdd(id) {
+  const ids = flowLog().filter(x => x !== id).concat([id]);
+  try { localStorage.setItem(FLOW_LOG_KEY, JSON.stringify({ date: todayStr(), ids: ids })); } catch (e) {}
 }
 
 function renderFlow() {
@@ -5076,19 +5956,26 @@ function renderFlow() {
   const q = flowQueue();
   const total = S.tasks.filter(isUnsorted).length;
   $('#inboxProgress').textContent = q.length
-    ? '未整理 ' + q.length + '件（INBOX・実行日未設定）'
+    ? '未整理 ' + q.length + '件（' + condSummary(inboxCond()) + '）'
     : '';
 
-  if (!q.length) {
-    $('#flowCard').innerHTML = '<div class="rounded-2xl bg-white p-10 text-center shadow-sm ring-1 ring-slate-200">' +
+  if (!q.length && !S.flowBackId) {
+    // 今日整理したタスクの一覧（タップで編集）。以前の「もう一度表示」は1件しか出ず役に立たなかった
+    const log = flowLog().map(id => S.tasks.find(x => x.id === id)).filter(Boolean).reverse();
+    $('#flowCard').innerHTML = '<div class="rounded-2xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200">' +
       '<p class="text-4xl">🎉</p><p class="mt-2 text-lg font-bold text-slate-800">未整理のタスクはありません</p>' +
       '<p class="mt-1 text-xs text-slate-500">新しいタスクが入ったらここに表示されます</p>' +
-      (Object.keys(S.flowDone).length ? '<button id="flowReset" class="mt-4 rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50">この画面で処理した分をもう一度表示</button>' : '') +
+      (S.flowHist && S.flowHist.length ? '<button id="flowBack" class="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50">← 1つ前のタスクに戻る</button>' : '') +
+      (log.length ? '<div class="mt-5 text-left"><p class="mb-1 text-xs font-bold text-slate-600">今日整理したタスク（' + log.length + '件）</p>' +
+        log.map(x => '<div class="flex cursor-pointer items-center gap-2 border-t border-slate-100 py-1.5 text-sm open-task" data-id="' + esc(x.id) + '">' +
+          '<span class="shrink-0 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600">' + esc(gtdShort(x.gtd)) + '</span>' +
+          '<span class="min-w-0 flex-1 truncate ' + (x.status === 'Done' ? 'text-slate-400 line-through' : 'text-slate-800') + '">' + esc(x.name) + '</span>' +
+          '<span class="shrink-0 text-[10px] text-slate-400">' + esc((S.projMap[x.project] || {}).name || '') + '</span></div>').join('') + '</div>' : '') +
       '</div>';
     return;
   }
 
-  const t = q[0];
+  const t = flowCurrent();
   const d = S.flowDraft = Object.assign({
     gtd: t.gtd || '', project: t.project || '', execDate: t.execDate || '', importance: t.importance || '',
     location: t.location || '', estMin: t.estMin === '' ? '' : t.estMin, memo: t.memo || '',
@@ -5097,7 +5984,7 @@ function renderFlow() {
     reschedulable: t.reschedulable || '', keepOverdue: !!t.keepOverdue,
     hasTime: !!t.hasTime, startTime: t.startTime || '', endTime: t.endTime || '',
     repeatRule: t.repeatRule || '', repeatNum: t.repeatNum === '' ? '' : t.repeatNum,
-    repeatDow: t.repeatDow || ''
+    repeatDow: t.repeatDow || '', assignee: t.assignee || ''
   }, S.flowDraft && S.flowDraft.__id === t.id ? S.flowDraft : {}, { __id: t.id });
 
   const today = todayStr();
@@ -5106,9 +5993,10 @@ function renderFlow() {
   $('#flowCard').innerHTML =
     '<div class="mx-auto max-w-2xl rounded-2xl bg-white p-4 shadow-lg ring-1 ring-slate-200 sm:p-6">' +
       '<div class="mb-1 flex items-center gap-2 text-[11px] text-slate-400">' +
-        '<span class="rounded-full bg-slate-100 px-2 py-0.5">' + (q.length) + '件中 1件目</span>' +
+        (S.flowHist && S.flowHist.length ? '<button id="flowBack" class="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-slate-600 hover:bg-slate-50">← 1つ前</button>' : '') +
+        '<span class="rounded-full bg-slate-100 px-2 py-0.5">' + (S.flowBackId ? '戻って編集中' : q.length + '件中 1件目') + '</span>' +
         (t.repeatRule ? '<span class="rounded-full bg-violet-100 px-2 py-0.5 text-violet-700">🔁 繰り返し</span>' : '') +
-        '<span class="ml-auto">スコア ' + taskScore(t) + '</span>' +
+        '<span class="ml-auto">' + esc(rankLabel(t)) + '</span>' +
       '</div>' +
       '<input id="flowName" class="w-full rounded-lg border border-transparent bg-transparent px-1 py-0.5 ' +
         'text-xl font-bold leading-snug text-slate-900 hover:border-slate-200 focus:border-indigo-500 ' +
@@ -5116,14 +6004,21 @@ function renderFlow() {
       '<p id="flowNameErr" class="mt-1 text-[11px] text-rose-600" hidden>タスク名を入力してください</p>' +
       '<textarea id="flowMemo" rows="2" class="inp mt-2 text-xs" placeholder="メモ（任意）">' + esc(d.memo) + '</textarea>' +
 
-      '<div class="mt-4"><p class="lbl">GTD種別</p><div class="flex flex-wrap gap-1.5">' +
-        (S.options.gtd || []).map(g => quickBtn('fl-gtd', g, gtdShort(g), d.gtd === g)).join('') + '</div></div>' +
+      // まず「タスク」か「メモ」かを選ぶ。メモ（Areas / Resources）を選ぶと、メモに要る欄だけになる
+      '<div class="mt-4 flex gap-1.5">' +
+        quickBtn('fl-kind', 'task', '✅ タスク', !ar) + quickBtn('fl-kind', 'memo', '📝 メモ', ar) + '</div>' +
+      '<div class="mt-3"><p class="lbl">' + (ar ? 'メモの種類' : 'GTD種別') + '</p><div class="flex flex-wrap gap-1.5">' +
+        (S.options.gtd || []).filter(g => isAreaLike(g) === ar).map(g => quickBtn('fl-gtd', g, gtdShort(g), d.gtd === g)).join('') + '</div></div>' +
+      // 担当者は「連絡する・依頼する」「連絡待ち」のときだけ
+      (isContactGtd(d.gtd) ?
+        '<div class="mt-3"><p class="lbl">担当者（連絡・依頼の相手）</p>' +
+          '<input id="flowAssignee" list="assigneeList" class="inp py-1.5 text-xs" autocomplete="off" placeholder="タップして一覧から選ぶ／名前を入力" value="' + esc(d.assignee || '') + '"></div>' : '') +
 
       '<div class="mt-3 grid gap-3 sm:grid-cols-2">' +
-        '<div><p class="lbl">プロジェクト</p>' +
-          // 名前を打つとその場で候補が絞れる。候補をクリックすれば即確定。
+        '<div><p class="lbl">📁 フォルダ</p>' +
+          // 名前を打つとその場で候補が絞れる。候補をクリックすれば即確定。上の階層の名前でも当たる
           '<input id="flowProjSearch" type="text" class="inp py-1.5 text-xs" autocomplete="off" ' +
-            'placeholder="プロジェクト名で検索（' + S.projects.length + '件）" value="' + esc(S.flowProjQ || '') + '">' +
+            'placeholder="フォルダ名で検索（' + S.projects.length + '件）" value="' + esc(S.flowProjQ || '') + '">' +
           '<div id="flowProjHits" class="mt-1 max-h-32 overflow-y-auto rounded-lg border border-slate-200 bg-white' +
             (S.flowProjQ ? '' : ' hidden') + '">' + flowProjHits(d) + '</div>' +
           '<select id="flowProject" class="inp mt-1 py-1.5 text-xs">' +
@@ -5140,7 +6035,8 @@ function renderFlow() {
         '</div></div>' +
       '</div>' +
 
-      // --- 期限（目標期限）---
+      // --- 期限（目標期限）。メモでは使わない（メモは絶対期限だけ）---
+      (ar ? '' :
       '<div class="mt-3"><p class="lbl">目標期限</p><div class="flex flex-wrap items-center gap-1.5">' +
         quickBtn('fl-due', d.execDate || today, '実行日と同じ', !!d.due && d.due === (d.execDate || today)) +
         quickBtn('fl-due', addDays(today, 7), '1週間後', d.due === addDays(today, 7)) +
@@ -5148,9 +6044,9 @@ function renderFlow() {
         quickBtn('fl-due', '', 'なし', !d.due) +
         '<span class="clr-wrap inline-block"><input id="flowDue" type="date" class="inp min-w-0 max-w-[11rem] px-2 py-1 text-xs" value="' + esc(d.due) + '">' +
           '<button type="button" class="clr" data-clear="flowDue" title="空欄にする"' + (d.due ? '' : ' hidden') + '>×</button></span>' +
-      '</div></div>' +
-      // --- 絶対期限（動かせない締切）---
-      (ar ? '' :
+      '</div></div>') +
+      // --- 絶対期限（動かせない締切）。メモにも使う ---
+      (
       '<div class="mt-3"><p class="lbl">絶対期限 <span class="text-[10px] font-normal text-slate-400">動かせない締切があるときだけ</span></p><div class="flex flex-wrap items-center gap-1.5">' +
         quickBtn('fl-hdue', d.due || '', '目標期限と同じ', !!d.hardDue && d.hardDue === d.due) +
         quickBtn('fl-hdue', '', 'なし', !d.hardDue) +
@@ -5243,9 +6139,9 @@ function renderFlow() {
 }
 
 function flowSave(markDone) {
-  const q = flowQueue();
-  if (!q.length) return;
-  const t = q[0], d = S.flowDraft || {};
+  const t = flowCurrent();
+  if (!t) return;
+  const d = S.flowDraft || {};
   syncFlowInputs();   // 入力中の値を取りこぼさない
 
   // 名前が空のまま先へ進ませない（あとで「無題」の山ができるのを防ぐ）
@@ -5274,11 +6170,17 @@ function flowSave(markDone) {
     estMin: d.estMin === '' ? '' : Number(d.estMin),
     categories: d.categories !== undefined ? d.categories : (t.categories || []),
     memo: $('#flowMemo') ? $('#flowMemo').value : d.memo,
+    assignee: isContactGtd(d.gtd || t.gtd) ? String(d.assignee || '').trim() : (t.assignee || ''),
     status: markDone ? 'Done' : t.status
   });
   localSave(task);
   S.flowDone[t.id] = true;
+  // 「1つ前に戻る」用の履歴と、今日整理した一覧
+  S.flowHist = (S.flowHist || []).filter(x => x !== t.id).concat([t.id]);
+  flowLogAdd(t.id);
+  S.flowBackId = null;
   S.flowDraft = null;
+  S.flowProjQ = '';          // 次のタスクに検索語を持ち越さない
   renderFlow();
   toast(markDone ? '完了にしました（未同期）' : '保存しました（次のタスクへ）');
 }
@@ -5410,7 +6312,7 @@ function cellValue(t, key) {
     case 'status': return '<span class="rounded px-1.5 py-0.5 text-[11px] ' +
       (t.status === 'Done' ? 'badge-done' : t.status === 'InProgress' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600') + '">' + esc(t.status) + '</span>';
     case 'gtd': return t.gtd ? '<span class="rounded px-1.5 py-0.5 text-[11px] ' + (GTD_STYLE[t.gtd] || 'bg-slate-100 text-slate-600') + '">' + esc(gtdShort(t.gtd)) + '</span>' : '—';
-    case 'project': return esc(p ? p.name : '—') + ((t.relatedProjects || []).length ? ' <span class="text-[10px] text-slate-400">＋' + t.relatedProjects.length + '</span>' : '');
+    case 'project': return (p ? '<span title="' + esc(folderPathStr(p.id)) + '">' + (folderParent(p) ? '<span class="text-[10px] text-slate-400">' + esc(folderPath(p.id).slice(-2, -1)[0]) + ' › </span>' : '') + esc(p.name) + '</span>' : '—') + ((t.relatedProjects || []).length ? ' <span class="text-[10px] text-slate-400">＋' + t.relatedProjects.length + '</span>' : '');
     case 'category': return esc((t.categories || []).map(c => S.catMap[c] || c).join(', ') || '—');
     case 'assignee': return esc(t.assignee || '—');
     case 'execDate': return t.execDate ? esc(t.execDate) + (t.hasTime && hasRealTime(t) ? ' <span class="text-[10px] text-slate-400">' + esc(t.startTime) + '</span>' : '')
@@ -5424,7 +6326,7 @@ function cellValue(t, key) {
     case 'actMin': return t.actMin === '' || t.actMin === undefined ? '—' : esc(minLabel(t.actMin));
     case 'repeatRule': return esc(t.repeatRule || '—');
     case 'asap': return t.asap ? '<span class="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] text-white">ASAP</span>' : '—';
-    case 'score': return '<span class="font-bold text-indigo-600">' + taskScore(t) + '</span>';
+    case 'score': return '<span class="text-[11px] font-bold text-indigo-600">' + esc(rankLabel(t)) + '</span>';
     case 'memo': return '<span class="memo-peek">' + esc((t.memo || '').slice(0, 160)) + '</span>';
     case 'updated': return '<span class="text-[11px] text-slate-400">' + esc(t.updated || '—') + '</span>';
     case 'created': return '<span class="text-[11px] text-slate-400">' + esc(t.created || '—') + '</span>';
@@ -5446,14 +6348,15 @@ function tableHtml(list, limit) {
   const ax = S.sortAxis || '';
   const arrow = key => ax === 'col:' + key + ':asc' ? ' ▲' : ax === 'col:' + key + ':desc' ? ' ▼' : '';
   return '<div class="overflow-auto rounded-xl bg-white shadow-sm ring-1 ring-slate-200">' +
-    '<table class="w-full min-w-[720px] text-sm"><thead class="sticky top-0 bg-slate-50 text-xs text-slate-500"><tr>' +
+    '<table class="ttable w-full min-w-[720px] text-sm"><thead class="sticky top-0 bg-slate-50 text-xs text-slate-500"><tr>' +
       '<th class="whitespace-nowrap px-3 py-2 text-left">操作</th>' +
       cols.map(c => '<th class="th cursor-pointer select-none whitespace-nowrap px-3 py-2 text-left hover:text-slate-800" data-sort="' + c.key + '" title="クリックで昇順／降順">' +
         esc(c.label) + '<span class="text-indigo-600">' + arrow(c.key) + '</span></th>').join('') +
     '</tr></thead><tbody class="divide-y divide-slate-100">' +
       (shown.map(t => '<tr class="cursor-pointer hover:bg-indigo-50/50" data-id="' + esc(t.id) + '">' +
         '<td class="row-acts whitespace-nowrap px-3 py-2 align-top"><div class="flex gap-1">' + actButtons(t, 'sm') + '</div></td>' +
-        cols.map(c => '<td class="px-3 py-2 align-top">' + cellValue(t, c.key) + '</td>').join('') + '</tr>').join('') ||
+        cols.map(c => { const v = cellValue(t, c.key); const empty = v === '' || v === '—' || /^<span[^>]*>—<\/span>$/.test(v);
+          return '<td class="td-' + c.key + (empty ? ' td-empty' : '') + ' px-3 py-2 align-top" data-label="' + esc(c.label) + '">' + v + '</td>'; }).join('') + '</tr>').join('') ||
        '<tr><td colspan="' + (cols.length + 1) + '" class="py-12 text-center text-sm text-slate-400">該当するタスクがありません</td></tr>') +
     '</tbody></table></div>' +
     (list.length > shown.length
@@ -5730,7 +6633,7 @@ const FIELD_DEFS = [
   { k: 'memo', id: 'mMemo', label: 'メモ', type: 'text' },
   { k: 'status', id: 'mStatus', label: 'ステータス', type: 'select' },
   { k: 'gtd', id: 'mGtd', label: 'GTD種別', type: 'select' },
-  { k: 'project', id: 'mProject', label: 'プロジェクト', type: 'select' },
+  { k: 'project', id: 'mProject', label: 'フォルダ', type: 'select' },
   { k: 'importance', id: 'mImportance', label: '重要度', type: 'select' },
   { k: 'execDate', id: 'mExec', label: '実行日', type: 'date' },
   { k: 'due', id: 'mDue', label: '目標期限', type: 'date' },
@@ -6071,6 +6974,13 @@ function nowFillValues() {
 function applyModalGtdMode() {
   const on = isAreaLike($('#mGtd').value);
   $$('#modal [data-ar]').forEach(el => setHidden(el, on));
+  // 担当者は「連絡する・依頼する」「連絡待ち」のときだけ（それ以外では使わないので隠す）
+  setHidden($('#mAssigneeBox'), on || !isContactGtd($('#mGtd').value));
+  // タスク／メモの切り替えボタンの見た目
+  $$('#modal .m-kind').forEach(b => {
+    const sel = (b.dataset.k === 'memo') === on;
+    b.className = 'm-kind flex-1 rounded-lg border px-3 py-2 text-sm ' + (sel ? 'border-slate-900 bg-slate-900 font-semibold text-white' : 'border-slate-300 bg-white text-slate-600');
+  });
   const note = $('#mAreaNote');
   if (note) setHidden(note, !on);
   // 「特定の場所」は 場所指定＝デスク/特定場所 のときだけ意味がある
@@ -6126,9 +7036,12 @@ function assigneeCandidates() {
 function renderAssigneeHits(q) {
   const box = $('#mAssigneeHits');
   if (!box) return;
-  const terms = searchTerms(q);
-  if (!terms.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
-  const list = assigneeCandidates().filter(a => matchTerms(a, terms)).slice(0, 30);
+  const all = q === '*';   // ▾ 一覧：検索せずに全員を出す（トグルで開閉）
+  if (all && !box.classList.contains('hidden') && box.dataset.all === '1') { box.classList.add('hidden'); box.dataset.all = ''; return; }
+  const terms = all ? [] : searchTerms(q);
+  if (!all && !terms.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  box.dataset.all = all ? '1' : '';
+  const list = all ? assigneeCandidates() : assigneeCandidates().filter(a => matchTerms(a, terms)).slice(0, 30);
   box.classList.remove('hidden');
   box.innerHTML = list.length
     ? list.map(a => '<button type="button" class="as-hit block w-full truncate px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-indigo-50" data-v="' + esc(a) + '">' + esc(a) + '</button>').join('')
@@ -6393,10 +7306,10 @@ function deleteTask() {
 const CFG = { tab: 'sort', draft: null };
 const COLUMN_DEFS = [
   { key: 'name', label: 'タスク名' }, { key: 'status', label: 'ステータス' }, { key: 'gtd', label: 'GTD種別' },
-  { key: 'project', label: 'プロジェクト' }, { key: 'category', label: '分類' }, { key: 'assignee', label: '担当者' },
+  { key: 'project', label: 'フォルダ' }, { key: 'assignee', label: '担当者' },
   { key: 'execDate', label: '実行日' }, { key: 'due', label: '目標期限' }, { key: 'importance', label: '重要度' },
   { key: 'location', label: '場所指定' }, { key: 'estMin', label: '予想必要時間' }, { key: 'actMin', label: '実所要時間' },
-  { key: 'repeatRule', label: '繰り返し' }, { key: 'asap', label: 'ASAP' }, { key: 'score', label: 'スコア' },
+  { key: 'repeatRule', label: '繰り返し' }, { key: 'asap', label: 'ASAP' }, { key: 'score', label: '並び順' },
   { key: 'memo', label: 'メモ' }, { key: 'updated', label: '最終更新' },
   { key: 'hardDue', label: '絶対期限' }, { key: 'created', label: '登録日' }
 ];
@@ -6580,66 +7493,75 @@ const newCfgId = p => p + Date.now().toString(36) + Math.random().toString(36).s
 
 /* ========== 🔢 配点 ========== */
 function renderCfgSort() {
-  const R = Object.assign({}, FALLBACK_SORT_RULES, CFG.draft.sortRules || {});
-  CFG.draft.sortRules = R;
-  const rules = CFG.draft.scoreRules || (CFG.draft.scoreRules = []);
-  const row = (k) => '<div class="flex items-center gap-2 border-b border-slate-100 py-1.5">' +
-    '<span class="flex-1 text-xs text-slate-700">' + esc(SORT_LABELS[k] || k) + '</span>' +
-    '<input type="number" class="cfg-sort w-24 rounded border border-slate-300 px-2 py-1 text-right text-xs" data-k="' + k + '" value="' + Number(R[k] || 0) + '"></div>';
+  const d = CFG.draft;
+  // 初めて開いたとき：既定の段と、以前の配点ルールを引き継いだ優先ルールを用意する
+  if (!Array.isArray(d.sortTiers)) d.sortTiers = JSON.parse(JSON.stringify(DEFAULT_SORT_TIERS));
+  if (!Array.isArray(d.priorityRules)) d.priorityRules = migratedPriorityRules(d);
+  const open = S.tasks.filter(t => t.status !== 'Done');
+  const obLabel = v => (TIER_ORDER_BY.find(o => o[0] === (v || '')) || ['', ''])[1];
+  const row = (kind, r, i, n, extra) => '<div class="flex flex-wrap items-center gap-2 border-b border-slate-100 py-1.5">' +
+      '<input type="checkbox" class="cfg-' + kind + '-on" data-i="' + i + '"' + (r.enabled !== false ? ' checked' : '') + '>' +
+      (kind === 'tier' ? '<span class="w-5 text-center text-xs font-bold text-slate-500">' + (i + 1) + '</span>' : '') +
+      '<span class="min-w-0 flex-1"><b class="text-xs text-slate-800">' + esc(r.name || '（無題）') + '</b>' + extra +
+        '<span class="block truncate text-[10px] text-slate-400">' + esc(condSummary(r.cond)) + '　該当 ' + open.filter(t => evalCond(t, r.cond)).length + '件</span></span>' +
+      upDown('cfg-' + kind, i, n) +
+      '<button type="button" class="cfg-' + kind + '-edit rounded border border-slate-300 px-2 py-0.5 text-[11px]" data-i="' + i + '">編集</button>' +
+      '<button type="button" class="cfg-' + kind + '-del rounded px-1.5 text-[11px] text-rose-600 hover:bg-rose-50" data-i="' + i + '">削除</button></div>';
   $('#cfgBody').innerHTML =
-    cfgCard('項目ごとの配点', Object.keys(SORT_LABELS).map(row).join(''),
-      '旧AppSheetの「ソート順」数式を配点にしたものです。数値が大きいほど上に並びます。') +
-    cfgCard('条件で加点するルール（自作）',
-      (rules.map((r, i) => '<div class="flex flex-wrap items-center gap-2 border-b border-slate-100 py-1.5">' +
-          '<label class="flex items-center gap-1.5"><input type="checkbox" class="cfg-rule-on" data-i="' + i + '"' + (r.enabled !== false ? ' checked' : '') + '></label>' +
-          '<span class="min-w-0 flex-1"><b class="text-xs text-slate-800">' + esc(r.name || '（無題）') + '</b>' +
-            '<span class="ml-2 rounded bg-indigo-50 px-1.5 text-[11px] font-bold text-indigo-700">' + (Number(r.points) > 0 ? '+' : '') + Number(r.points || 0) + '</span>' +
-            '<span class="block truncate text-[10px] text-slate-400">' + esc(condSummary(r.cond)) + '　該当 ' + S.tasks.filter(t => t.status !== 'Done' && evalCond(t, r.cond)).length + '件</span></span>' +
-          upDown('cfg-rule', i, rules.length) +
-          '<button type="button" class="cfg-rule-edit rounded border border-slate-300 px-2 py-0.5 text-[11px]" data-i="' + i + '">編集</button>' +
-          '<button type="button" class="cfg-rule-del rounded px-1.5 text-[11px] text-rose-600 hover:bg-rose-50" data-i="' + i + '">削除</button></div>').join('') ||
-        '<p class="text-[11px] text-slate-400">まだありません</p>') +
-      '<button type="button" id="cfgRuleAdd" class="mt-2 rounded-lg border border-dashed border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50">＋ ルールを追加</button>' +
-      '<div id="ruleEditor" class="mt-2" hidden></div>',
-      '例：「プロジェクトが 人材ハイスクール かつ 期限が7日以内 なら +500」のように、条件（かつ／または の入れ子も可）と点数を自由に作れます。') +
-    cfgCard('特定タスク名の固定加点',
-      (R.namedTasks || []).map((n, i) => '<div class="flex items-center gap-2 py-1">' +
-        '<input class="cfg-named-name flex-1 rounded border border-slate-300 px-2 py-1 text-xs" data-i="' + i + '" value="' + esc(n.name) + '">' +
-        '<input type="number" class="cfg-named-score w-24 rounded border border-slate-300 px-2 py-1 text-right text-xs" data-i="' + i + '" value="' + Number(n.score || 0) + '">' +
-        '<button class="cfg-named-del rounded px-1.5 text-rose-500 hover:bg-rose-50" data-i="' + i + '">✕</button></div>').join('') +
-      '<button id="cfgNamedAdd" class="mt-1 rounded-lg border border-dashed border-slate-300 px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-50">＋ 固定タスクを追加</button>') +
-    '<div id="cfgTop10" class="mb-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200"><p class="mb-2 text-xs font-bold text-slate-700">現在の配点での上位10件</p>' + previewTop10() + '</div>';
-  $('#cfgHint').textContent = '変更は即座にプレビューへ反映されます';
+    cfgCard('① 絶対ソート（上の段から順に、必ずこの順で並ぶ）',
+      (d.sortTiers.map((r, i) => row('tier', r, i, d.sortTiers.length,
+        r.orderBy ? '<span class="ml-2 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600">段の中は' + esc(obLabel(r.orderBy)) + '</span>' : '')).join('') ||
+        '<p class="text-[11px] text-slate-400">段がありません</p>') +
+      '<p class="mt-1 text-[11px] text-slate-400">どの段にも当てはまらないタスクは一番下（「その他」）に並びます。</p>' +
+      '<div class="mt-2 flex gap-2"><button type="button" id="cfgTierAdd" class="rounded-lg border border-dashed border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50">＋ 段を追加</button>' +
+      '<button type="button" id="cfgTierReset" class="rounded-lg border border-slate-300 px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-50">既定に戻す</button></div>' +
+      '<div id="tierEditor" class="mt-2" hidden></div>',
+      'タスクは上から順に条件を調べ、<b>最初に当てはまった段</b>に入ります。段の順番は点数に関係なく絶対です。' +
+      '「段の中の並べ方」を決めておくと（絶対期限が早い順など）、同じ段の中はその順に並びます。') +
+    cfgCard('② 優先ソート（同じ段の中で、並べ方でも同じ順位のとき）',
+      (d.priorityRules.map((r, i) => row('prio', r, i, d.priorityRules.length,
+        '<span class="ml-2 rounded bg-indigo-50 px-1.5 text-[11px] font-bold text-indigo-700">' + (Number(r.points) > 0 ? '+' : '') + Number(r.points || 0) + '</span>')).join('') ||
+        '<p class="text-[11px] text-slate-400">ルールがありません</p>') +
+      '<div class="mt-2 flex gap-2"><button type="button" id="cfgPrioAdd" class="rounded-lg border border-dashed border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50">＋ ルールを追加</button>' +
+      '<button type="button" id="cfgPrioReset" class="rounded-lg border border-slate-300 px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-50">既定に戻す</button></div>' +
+      '<div id="prioEditor" class="mt-2" hidden></div>',
+      '当てはまるルールの点数の合計が大きいほど上。既定は ASAP 100点 → 重要度「高」10点 → 時刻あり 1点（＝この順で効く）。' +
+      '既定のルールも含めて、すべて編集・削除できます。以前の「自作の配点ルール」「特定タスク名の固定加点」もここに引き継いでいます。') +
+    '<div id="cfgTop10" class="mb-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200"><p class="mb-2 text-xs font-bold text-slate-700">この設定での上位10件</p>' + previewTop10() + '</div>';
+  $('#cfgHint').textContent = '変更はすぐ下のプレビューに反映されます。保存すると全員に適用されます';
 }
 
-/** ルール1件の編集欄（名前・点数・条件式） */
-function openRuleEditor(i) {
-  const rules = CFG.draft.scoreRules;
-  const r = i === -1 ? { id: newCfgId('r'), name: '', points: 100, enabled: true, cond: { g: 'and', items: [] } }
-                     : JSON.parse(JSON.stringify(rules[i]));
-  CFG.ruleEdit = { i: i, r: r };
-  const box = $('#ruleEditor');
+/** 段・優先ルール1件の編集欄（名前・条件式・段の中の並べ方／点数） */
+function openRankEditor(kind, i) {
+  const list = kind === 'tier' ? CFG.draft.sortTiers : CFG.draft.priorityRules;
+  const r = i === -1 ? { id: newCfgId(kind === 'tier' ? 't' : 'p'), name: '', enabled: true, cond: { g: 'and', items: [] },
+                         orderBy: '', points: kind === 'tier' ? undefined : 10 }
+                     : JSON.parse(JSON.stringify(list[i]));
+  CFG.rankEdit = { kind: kind, i: i, r: r };
+  const box = $(kind === 'tier' ? '#tierEditor' : '#prioEditor');
   box.hidden = false;
   box.innerHTML = '<div class="rounded-lg bg-indigo-50/50 p-2.5 ring-1 ring-indigo-200">' +
-    '<div class="mb-2 flex flex-wrap gap-2"><input id="reName" class="inp flex-1 py-1.5 text-xs" placeholder="ルール名（例：人材ハイスクールの締切前）" value="' + esc(r.name) + '">' +
-    '<input id="rePts" type="number" class="inp w-28 py-1.5 text-right text-xs" value="' + Number(r.points || 0) + '"><span class="pt-1.5 text-xs">点</span></div>' +
-    '<div id="condRule"></div>' +
-    '<div class="mt-2 flex gap-2"><button type="button" id="reOk" class="flex-1 rounded-lg bg-indigo-600 py-2 text-xs font-semibold text-white">このルールを確定</button>' +
-    '<button type="button" id="reCancel" class="rounded-lg border border-slate-300 px-3 py-2 text-xs">やめる</button></div></div>';
-  CondUI.mount('condRule', r.cond, c => { r.cond = c; });
+    '<div class="mb-2 flex flex-wrap gap-2"><input id="rkName" class="inp flex-1 py-1.5 text-xs" placeholder="名前（例：人材ハイスクールの締切前）" value="' + esc(r.name) + '">' +
+    (kind === 'tier'
+      ? '<select id="rkOrder" class="inp w-auto py-1.5 text-xs">' + TIER_ORDER_BY.map(o => '<option value="' + o[0] + '"' + ((r.orderBy || '') === o[0] ? ' selected' : '') + '>段の中：' + o[1] + '</option>').join('') + '</select>'
+      : '<input id="rkPts" type="number" class="inp w-28 py-1.5 text-right text-xs" value="' + Number(r.points || 0) + '"><span class="pt-1.5 text-xs">点</span>') +
+    '</div><div id="condRank"></div>' +
+    '<div class="mt-2 flex gap-2"><button type="button" id="rkOk" class="flex-1 rounded-lg bg-indigo-600 py-2 text-xs font-semibold text-white">確定</button>' +
+    '<button type="button" id="rkCancel" class="rounded-lg border border-slate-300 px-3 py-2 text-xs">やめる</button></div></div>';
+  CondUI.mount('condRank', r.cond, c => { r.cond = c; });
   box.scrollIntoView({ block: 'nearest' });
 }
 
 function previewTop10() {
-  const backup = { r: S.settings.sortRules, sr: S.settings.scoreRules };
-  S.settings.sortRules = CFG.draft.sortRules; S.settings.scoreRules = CFG.draft.scoreRules;
+  const backup = { t: S.settings.sortTiers, p: S.settings.priorityRules };
+  S.settings.sortTiers = CFG.draft.sortTiers; S.settings.priorityRules = CFG.draft.priorityRules;
   bumpScores();
   const list = S.tasks.filter(t => t.status !== 'Done').sort(byScoreDesc).slice(0, 10);
   const html = list.map((t, i) => '<div class="flex items-center gap-2 border-b border-slate-100 py-1 text-xs">' +
     '<span class="w-5 text-slate-400">' + (i + 1) + '</span>' +
-    '<span class="w-14 text-right font-bold text-indigo-600">' + taskScore(t) + '</span>' +
+    '<span class="w-40 shrink-0 truncate text-[11px] font-bold text-indigo-600">' + esc(rankLabel(t)) + '</span>' +
     '<span class="min-w-0 flex-1 truncate">' + esc(t.name) + '</span></div>').join('');
-  S.settings.sortRules = backup.r; S.settings.scoreRules = backup.sr;
+  S.settings.sortTiers = backup.t; S.settings.priorityRules = backup.p;
   bumpScores();
   return html || '<p class="text-xs text-slate-400">タスクがありません</p>';
 }
@@ -6699,8 +7621,8 @@ function openSliceEditor(id) {
 }
 
 /* ========== ↕ 並び順 ========== */
-const SORT_KEY_FIELDS = [{ f: 'score', label: 'ソート順スコア' }, { f: 'exec', label: '実行日' }].concat(
-  COND_FIELDS.filter(x => ['date', 'enum', 'text', 'num', 'bool'].indexOf(x.type) >= 0 && x.f !== 'execDate')
+const SORT_KEY_FIELDS = [{ f: 'score', label: '並び順（絶対＋優先ソート）' }, { f: 'exec', label: '実行日' }].concat(
+  COND_FIELDS.filter(x => !x.legacy && ['date', 'enum', 'text', 'num', 'bool'].indexOf(x.type) >= 0 && x.f !== 'execDate')
     .map(x => ({ f: x.f, label: x.label })));
 function renderCfgSorts() {
   const list = CFG.draft.sortPresets || (CFG.draft.sortPresets = []);
@@ -6862,7 +7784,7 @@ function renderCfgShare() {
     '<label class="flex cursor-pointer items-center gap-1 rounded border border-slate-200 px-2 py-1 text-[11px]"><input type="checkbox" class="' + cls + '" value="' + esc(p.id) + '"' +
       (sel.indexOf(p.id) >= 0 ? ' checked' : '') + '>' + esc(p.name) + '</label>').join('') + '</div>';
   $('#cfgBody').innerHTML =
-    cfgCard('📮 連絡用PDF（担当者別・毎日）',
+    cfgCard('📮 連絡用ドキュメント（担当者別・毎日）',
       '<label class="flex items-center gap-2 text-xs"><input id="cpOn" type="checkbox"' + (cp.enabled ? ' checked' : '') + '> 毎朝つくる</label>' +
       '<label class="mt-2 flex items-center gap-2 text-xs">連絡待ちを「念のため確認」に載せ直す間隔 <input id="cpDays" type="number" min="1" class="inp w-20 py-1 text-right text-xs" value="' + esc(cp.repeatDays) + '"> 日</label>' +
       '<button type="button" id="cpNow" class="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-slate-50">📄 いま作る</button>' +
@@ -6951,10 +7873,11 @@ const TAB_DEFS = [
   { id: 'gantt',    label: 'ガントチャート' },
   { id: 'memo',     label: 'プロジェクトメモ' },
   { id: 'inbox',    label: '📥 Inbox整理' },
-  { id: 'projects', label: '📁 プロジェクト一覧' },
+  { id: 'projects', label: '📁 フォルダ' },
   { id: 'all',      label: '全タスク検索' },
   { id: 'notes',    label: '🗒 メモ' },
-  { id: 'rules',    label: '🧭 マイルール' }
+  { id: 'rules',    label: '🧭 マイルール' },
+  { id: 'habits',   label: '🌱 習慣' }
 ];
 const FOCUS_SECTIONS = [
   { key: 'due3',    label: '今日/明日/明後日の期限3列' },
@@ -7040,6 +7963,10 @@ function renderCfgTabs() {
       '<p class="mt-3 lbl">さらに条件式で絞る（任意）</p><div id="condFocus"></div>',
       'チェックしたGTD種別だけがフォーカス画面（デスク／どこでも／スキップ）に出ます。既定は「今すぐやる・要細分化・連絡する・依頼する・実行待ち」。' +
       'ステータスが Done のタスクは常に除外されます。') +
+    cfgCard('📥 INBOX整理の対象',
+      '<div id="condInbox"></div>',
+      '高速整理・AI整理に出すタスクの条件です。既定は「GTD種別が INBOX かつ ステータスが Done 以外」。' +
+      '条件を全部消すと既定に戻ります。（「昨日以前に登録されたものだけ」の設定は別にあります）') +
     cfgCard('繰り返しタスクの補正',
       '<div class="flex flex-wrap gap-2">' +
         '<button id="btnRescue" class="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">🚑 いま補正する</button>' +
@@ -7049,6 +7976,8 @@ function renderCfgTabs() {
       '「重複したルーティンを整理」… 名前・実行日・期限がまったく同じ回が2つ以上あるとき、1つを残して余分を Done にします' +
       '（メモの先頭に［重複整理］と付くので、あとから探して戻せます）。期限が違う同じ内容のタスクは対象外です。実行前に対象を確認できます。');
   CondUI.mount('condFocus', CFG.focusCond, c => { CFG.focusCond = c; });
+  if (!CFG.draft.inboxCond || !CFG.draft.inboxCond.g) CFG.draft.inboxCond = JSON.parse(JSON.stringify(INBOX_COND_DEFAULT));
+  CondUI.mount('condInbox', CFG.draft.inboxCond, c => { CFG.draft.inboxCond = c; });
   $('#cfgHint').textContent = '並び順・表示の変更は保存すると全員に適用されます';
 }
 
@@ -7084,11 +8013,10 @@ function renderCfgMasters() {
   const base = ['00_INBOX', '01-1_今すぐやる', '01-2_いつかやる・たぶんやる', '02_要細分化', '03-1_連絡する・依頼する', '03-2_連絡待ち', '04_実行待ち', 'Areas', 'Resources'];
   $('#cfgBody').innerHTML =
     group('GTD種別', 'gtd', (S.options.gtd || []).map(g => ({ label: g, value: g, removable: base.indexOf(g) < 0 })), '標準の9種別は削除できません') +
-    group('分類', 'category', S.categories.map(c => ({ label: c.name, value: c.id, removable: false })), '分類は「分類一覧」シートに追加されます（削除はシート側で行ってください）') +
     group('担当者', 'assignee', (S.assignees || []).map(a => ({ label: a, value: a, removable: (m.assignees || []).indexOf(a) >= 0 })), '') +
     group('場所指定', 'location', (S.options.location || []).filter(Boolean).map(v => ({ label: v, value: v, removable: ['デスク/特定場所', 'どこでも'].indexOf(v) < 0 })), '') +
-    group('プロジェクト', 'project', S.projects.slice(0, 30).map(p => ({ label: p.name, value: p.id, removable: false })),
-      S.projects.length > 30 ? '先頭30件のみ表示しています' : '');
+    group('フォルダ', 'project', S.projects.slice(0, 30).map(p => ({ label: folderPathStr(p.id), value: p.id, removable: false })),
+      (S.projects.length > 30 ? '先頭30件のみ表示しています。' : '') + 'フォルダの入れ子・移動は「プロジェクト」タブで行います');
   $('#cfgHint').textContent = 'マスタの追加は即時にサーバーへ保存されます（オーナーのみ）';
 }
 
@@ -7116,14 +8044,8 @@ function collectCfg() {
   const d = CFG.draft;
   if (!d) return d;        // 設定画面を開く前に呼ばれても落ちないようにする
   if (CFG.tab === 'sort') {
-    $$('.cfg-sort').forEach(i => { d.sortRules[i.dataset.k] = Number(i.value || 0); });
-    $$('.cfg-rule-on').forEach(c => { const r = (d.scoreRules || [])[Number(c.dataset.i)]; if (r) r.enabled = c.checked; });
-    const names = [];
-    $$('.cfg-named-name').forEach((i, idx) => {
-      const sc = $$('.cfg-named-score')[idx];
-      if (i.value.trim()) names.push({ name: i.value.trim(), score: Number(sc ? sc.value : 0) });
-    });
-    d.sortRules.namedTasks = names;
+    $$('.cfg-tier-on').forEach(c => { const r = (d.sortTiers || [])[Number(c.dataset.i)]; if (r) r.enabled = c.checked; });
+    $$('.cfg-prio-on').forEach(c => { const r = (d.priorityRules || [])[Number(c.dataset.i)]; if (r) r.enabled = c.checked; });
   } else if (CFG.tab === 'fields') {
     collectCfgFields(d);
   } else if (CFG.tab === 'columns') {
@@ -7198,9 +8120,9 @@ function collectCfg() {
 /** サーバーへ保存する設定の項目 */
 const SAVED_SETTING_KEYS = ['sortRules', 'slices', 'visibleSlices', 'tableColumns', 'ganttDays', 'focusAlert', 'tabs',
   'focusSections', 'focusFilter', 'taskDefaults', 'inboxOnlyBeforeToday', 'autoDoneOverdueAreas',
-  'hiddenBuiltinSlices', 'sliceOrder', 'filterOrder', 'sortPresets', 'scoreRules', 'places', 'capacity',
+  'hiddenBuiltinSlices', 'sliceOrder', 'filterOrder', 'sortPresets', 'scoreRules', 'sortTiers', 'priorityRules', 'places', 'capacity',
   'reviewIntervals', 'pomodoro', 'contactPdf', 'sharePdf', 'ruleProjects', 'homeProjects', 'ai', 'calendars', 'startView',
-  'fieldProps'];
+  'fieldProps', 'inboxCond'];
 
 async function saveCfg() {
   const d = collectCfg();
@@ -7774,7 +8696,11 @@ function openProject(pid, opts) {
     ? { name: o.presetName || '', start: todayStr(), end: '', status: '進行中', members: [], note: '', categories: [], goal: '', deadline: '', milestones: [], major: '', middle: '', minor: '' }
     : S.projMap[pid];
   if (!p) return;
-  $('#pTitle').textContent = isNew ? '➕ 新規プロジェクト' : 'プロジェクト設定';
+  $('#pTitle').textContent = isNew ? '➕ 新しいフォルダ' : '📁 フォルダの設定';
+  // 親フォルダの候補。自分と自分の中のフォルダは選べない（輪になるため）
+  const par = isNew ? (o.parent || '') : folderParent(p);
+  $('#pParent').innerHTML = '<option value="">（いちばん上）</option>' + folderOptionsHtml(par, isNew ? '' : pid);
+  $('#pParent').value = par;
   renderAxisDatalists();
   $('#pMajor').value = p.major || ''; $('#pMiddle').value = p.middle || ''; $('#pMinor').value = p.minor || '';
   $('#pName').value = p.name; $('#pStart').value = p.start; $('#pEnd').value = p.end;
@@ -7795,7 +8721,7 @@ function openProject(pid, opts) {
 async function saveProject() {
   const pid = $('#pmodal').dataset.id || '';
   const name = $('#pName').value.trim();
-  if (!name) { toast('プロジェクト名を入力してください', 'err'); $('#pName').focus(); return; }
+  if (!name) { toast('フォルダ名を入力してください', 'err'); $('#pName').focus(); return; }
   const ms = collectMilestones();
   const dto = {
     id: pid, name: name, start: $('#pStart').value, end: $('#pEnd').value,
@@ -7804,7 +8730,7 @@ async function saveProject() {
     goal: ms.length ? ms[0].goal : '', deadline: ms.length ? ms[0].due : '',
     members: $('#pMembers').value.split(/\s*,\s*/).filter(Boolean),
     categories: $$('#pCategories input:checked').map(c => c.value),
-    major: $('#pMajor').value.trim(), middle: $('#pMiddle').value.trim(), minor: $('#pMinor').value.trim(),
+    parent: $('#pParent').value || '',
     aiEnabled: $('#pAi').checked,
     clientId: $('#pmodal').dataset.clientId || ''
   };
@@ -7818,7 +8744,7 @@ async function saveProject() {
       name: dto.name, start: dto.start, end: dto.end, status: dto.status, note: dto.note,
       goal: dto.goal, deadline: dto.deadline, milestones: dto.milestones,
       members: dto.members, categories: dto.categories,
-      major: dto.major, middle: dto.middle, minor: dto.minor, aiEnabled: dto.aiEnabled
+      parent: dto.parent, aiEnabled: dto.aiEnabled
     });
     PBASE = null;
     if (res.docUrl) p.docUrl = res.docUrl;
@@ -7864,7 +8790,7 @@ async function refreshProjects() {
 /* プロジェクト画面：変更があるのに閉じようとしたら確認する */
 let PBASE = null;
 function projectFormSig() {
-  return JSON.stringify(['#pName', '#pStart', '#pEnd', '#pStatus', '#pMembers', '#pNote', '#pMajor', '#pMiddle', '#pMinor']
+  return JSON.stringify(['#pName', '#pStart', '#pEnd', '#pStatus', '#pMembers', '#pNote', '#pParent']
     .map(id => ($(id) || {}).value) .concat([$$('#pCategories input:checked').map(c => c.value), collectMilestones()]));
 }
 function requestCloseProject() {
@@ -7881,14 +8807,18 @@ async function deleteProjectFlow() {
   if (!pid || !p) return;
   const linked = S.tasks.filter(t => t.project === pid);
   const open = linked.filter(t => t.status !== 'Done').length;
-  const msg = '「' + p.name + '」を削除します。\n\n' +
-    '・紐づくタスク ' + linked.length + '件（未完了 ' + open + '件）は削除されません\n' +
-    '・それらのタスクの「プロジェクト」欄が空になります\n' +
+  const kids = folderChildren(pid);
+  const up = folderParent(p);
+  const msg = 'フォルダ「' + p.name + '」を削除します。\n\n' +
+    '・中のタスク ' + linked.length + '件（未完了 ' + open + '件）は削除されません。フォルダ欄が空になります\n' +
+    (kids.length ? '・中のフォルダ ' + kids.length + '件は消さずに「' + (up ? S.projMap[up].name : 'いちばん上') + '」へ移します\n' : '') +
     '・この操作は元に戻せません\n\n削除してよろしいですか？';
   if (!window.confirm(msg)) return;
   busy(true, '削除中…');
   try {
     const res = await api.deleteProject(pid);
+    folderChildren(pid).forEach(c => { c.parent = up; });        // 中のフォルダは1つ上へ（サーバーと同じ動き）
+    if (S.folderAt === pid) S.folderAt = up;
     S.projects = S.projects.filter(x => x.id !== pid);
     delete S.projMap[pid];
     S.tasks.forEach(t => { if (t.project === pid) t.project = ''; });
@@ -8050,10 +8980,13 @@ const HDR = {
     }
 
     if (Math.abs(d) < 6) { this.armAutoHide(this.autoMs); return; }   // 微小な揺れは無視
+    /* 上へのスクロール量をためて、はっきり上へ戻したときだけ出す（2026-10）。
+       指を離したときの慣性の揺れ戻しで出てきてしまうのを防ぐ。 */
+    this.upAcc = d < 0 ? (this.upAcc || 0) - d : 0;
     if (d > 0 && y > 100 && !this.blocked()) {
       this.hide();                               // 下スクロール中は収納
-    } else if (d < 0) {
-      this.show();                               // 少し上へスワイプしただけで即復帰
+    } else if (d < 0 && (this.upAcc > 80 || y <= 100)) {
+      this.show();                               // はっきり上へ戻したら表示
       this.armAutoHide(this.AUTO_AFTER_UP);      // 出したあと2秒で自動収納
       return;
     } else {
@@ -8112,10 +9045,13 @@ const HDR = {
       this.armAutoHide(this.PC_IDLE);
     }, { passive: true });
 
-    // 画面に触れた瞬間に再表示し、触るのをやめてから収納を数え直す
-    ['pointerdown', 'touchstart', 'keydown'].forEach(ev => {
-      window.addEventListener(ev, () => {
-        this.show();                         // 触ったら即座に降ろす
+    /* 以前は「画面に触れた瞬間」にも表示していたが、スマホではスクロールのたびに指を置くので、
+       指を離すとすぐヘッダーが降りてきて鬱陶しかった（2026-10）。
+       スマホは上へスクロールしたときだけ表示。PC（マウス）はクリック・キー入力で表示する。 */
+    ['pointerdown', 'keydown'].forEach(ev => {
+      window.addEventListener(ev, e => {
+        if (ev === 'pointerdown' && e.pointerType && e.pointerType !== 'mouse') return;   // 指・ペンは対象外
+        this.show();
         this.armAutoHide();
       }, { passive: true });
     });
@@ -8484,7 +9420,21 @@ function bindEvents() {
     }
     if (e.target.id === 'flowNext') { flowSave(false); return; }
     if (e.target.id === 'flowDoneNow') { flowSave(true); return; }
-    if (e.target.id === 'flowSkip') { const q = flowQueue(); if (q.length) { S.flowDone[q[0].id] = true; S.flowDraft = null; renderFlow(); } return; }
+    if (e.target.id === 'flowSkip') { const c = flowCurrent(); if (c) { S.flowDone[c.id] = true; S.flowHist = (S.flowHist || []).filter(x => x !== c.id).concat([c.id]); S.flowBackId = null; S.flowDraft = null; S.flowProjQ = ''; renderFlow(); } return; }
+    if (e.target.id === 'flowBack') {
+      // 直前に処理したタスクをもう一度表示する（GTDを変えて整理対象から外れていても出す）
+      const h = S.flowHist || [];
+      const prev = h.pop();
+      if (prev) { S.flowBackId = prev; S.flowDraft = null; S.flowProjQ = ''; renderFlow(); }
+      return;
+    }
+    const fk = e.target.closest('.fl-kind');
+    if (fk) {
+      // タスク／メモの切り替え。メモは Resources（すでに Areas ならそのまま）、タスクに戻すと INBOX
+      if (fk.dataset.v === 'memo') { if (!isAreaLike(d.gtd)) d.gtd = 'Resources'; }
+      else if (isAreaLike(d.gtd)) d.gtd = '00_INBOX';
+      renderFlow(); return;
+    }
     if (e.target.id === 'flowReset') { S.flowDone = {}; renderFlow(); return; }
     // プロジェクト候補をクリックして即確定（画面は作り直さず該当箇所だけ更新）
     const fp = e.target.closest('.fl-proj');
@@ -8499,7 +9449,13 @@ function bindEvents() {
         }
         sel.value = fp.dataset.id;
       }
-      $('#flowProjHits').innerHTML = flowProjHits(d);
+      // 確定したら検索語は消す（残っていると、消したときに選択まで外れ、次のタスクにも語が持ち越されていた）
+      S.flowProjQ = '';
+      const inp = $('#flowProjSearch');
+      if (inp) inp.value = '';
+      const hitsBox = $('#flowProjHits');
+      if (hitsBox) { hitsBox.innerHTML = ''; hitsBox.classList.add('hidden'); }
+      if (sel) { sel.innerHTML = '<option value="">（なし）</option>' + flowProjOptions(d); sel.value = d.project; }
       return;
     }
   });
@@ -8584,7 +9540,6 @@ function bindEvents() {
   document.addEventListener('change', e => {
     if (e.target.id === 'sortAxis') { S.sortAxis = e.target.value; renderCurrent(); }
     if (e.target.id === 'projSort') { S.projSort = e.target.value; renderProjects(); }
-    if (e.target.id === 'projCat') { S.projCats = e.target.value ? [e.target.value] : []; renderProjects(); }
   });
   document.addEventListener('click', e => {
     const po = e.target.closest('.proj-open');
@@ -8595,10 +9550,14 @@ function bindEvents() {
     if (pe) { openProject(pe.dataset.pid); return; }
     const pd = e.target.closest('.proj-del');
     if (pd) { openProject(pd.dataset.pid); setTimeout(deleteProjectFlow, 0); return; }
-    if (e.target.id === 'projNew') { openProject(''); return; }
+    if (e.target.id === 'projNew') { openProject('', { parent: S.folderAt || '' }); return; }
+    if (e.target.id === 'foldTaskNew') { openTask(null, { preset: { project: S.folderAt || '' } }); return; }
     if (e.target.id === 'projClear') { S.projQ = ''; S.projCats = []; renderProjects(); return; }
+    const fg = e.target.closest('.fold-go');
+    if (fg) { S.folderAt = fg.dataset.fid || ''; S.projQ = ''; renderProjects(); window.scrollTo(0, 0); return; }
     const pc = e.target.closest('.proj-card');
-    if (pc && !e.target.closest('button')) { openProject(pc.dataset.pid); }   // カード本体 → 編集モーダル
+    // カード本体 → そのフォルダの中へ（Explorer と同じ。編集は ✎ ボタン）
+    if (pc && !e.target.closest('button')) { S.folderAt = pc.dataset.pid; S.projQ = ''; renderProjects(); window.scrollTo(0, 0); }
   });
 
   // 設定：タブ並べ替え・セクション表示・繰り返し補正
@@ -8671,35 +9630,38 @@ function bindEvents() {
   $$('.cfgtab').forEach(b => b.onclick = () => { collectCfg(); switchCfgTab(b.dataset.cfg); });
 
   $('#cfgBody').addEventListener('input', e => {
-    if (e.target.closest('.cfg-sort, .cfg-named-name, .cfg-named-score, .cfg-rule-on')) {
+    if (e.target.closest('.cfg-tier-on, .cfg-prio-on')) {
       collectCfg();
       const box = $('#cfgTop10');
-      if (box && CFG.tab === 'sort') box.innerHTML = '<p class="mb-2 text-xs font-bold text-slate-700">現在の配点での上位10件</p>' + previewTop10();
+      if (box && CFG.tab === 'sort') box.innerHTML = '<p class="mb-2 text-xs font-bold text-slate-700">この設定での上位10件</p>' + previewTop10();
     }
   });
   $('#cfgBody').addEventListener('click', async e => {
-    // 固定タスクの追加・削除
-    if (e.target.id === 'cfgNamedAdd') { collectCfg(); CFG.draft.sortRules.namedTasks.push({ name: '', score: 0 }); renderCfgSort(); return; }
-    const nd = e.target.closest('.cfg-named-del');
-    if (nd) { collectCfg(); CFG.draft.sortRules.namedTasks.splice(Number(nd.dataset.i), 1); renderCfgSort(); return; }
     const d = CFG.draft;
     const btn = e.target.closest('button');
     const cls = c => btn && btn.classList.contains(c);
     const idx = () => Number(btn.dataset.i);
 
-    /* ---- 配点ルール ---- */
-    if (cls('cfg-rule-up') || cls('cfg-rule-down')) { collectCfg(); moveItem(d.scoreRules, idx(), cls('cfg-rule-up') ? -1 : 1); renderCfgSort(); return; }
-    if (cls('cfg-rule-del')) { collectCfg(); d.scoreRules.splice(idx(), 1); renderCfgSort(); return; }
-    if (cls('cfg-rule-edit')) { collectCfg(); openRuleEditor(idx()); return; }
-    if (btn && btn.id === 'cfgRuleAdd') { collectCfg(); openRuleEditor(-1); return; }
-    if (btn && btn.id === 'reCancel') { $('#ruleEditor').hidden = true; CFG.ruleEdit = null; return; }
-    if (btn && btn.id === 'reOk') {
-      const ed = CFG.ruleEdit; if (!ed) return;
-      ed.r.name = $('#reName').value.trim() || '（無題のルール）';
-      ed.r.points = Number($('#rePts').value || 0);
-      ed.r.cond = CondUI.get('condRule');
-      if (ed.i === -1) d.scoreRules.push(ed.r); else d.scoreRules[ed.i] = ed.r;
-      CFG.ruleEdit = null; renderCfgSort(); toast('ルールを確定しました（保存すると全員に反映されます）'); return;
+    /* ---- 並び順：絶対ソートの段・優先ソートのルール ---- */
+    for (const kind of ['tier', 'prio']) {
+      const list = kind === 'tier' ? d.sortTiers : d.priorityRules;
+      if (cls('cfg-' + kind + '-up') || cls('cfg-' + kind + '-down')) { collectCfg(); moveItem(list, idx(), cls('cfg-' + kind + '-up') ? -1 : 1); renderCfgSort(); return; }
+      if (cls('cfg-' + kind + '-del')) { collectCfg(); list.splice(idx(), 1); renderCfgSort(); return; }
+      if (cls('cfg-' + kind + '-edit')) { collectCfg(); openRankEditor(kind, idx()); return; }
+    }
+    if (btn && btn.id === 'cfgTierAdd') { collectCfg(); openRankEditor('tier', -1); return; }
+    if (btn && btn.id === 'cfgPrioAdd') { collectCfg(); openRankEditor('prio', -1); return; }
+    if (btn && btn.id === 'cfgTierReset') { if (confirm('絶対ソートを既定の8段に戻しますか？')) { d.sortTiers = JSON.parse(JSON.stringify(DEFAULT_SORT_TIERS)); renderCfgSort(); } return; }
+    if (btn && btn.id === 'cfgPrioReset') { if (confirm('優先ソートを既定（ASAP・重要度高・時刻あり）に戻しますか？')) { d.priorityRules = JSON.parse(JSON.stringify(DEFAULT_PRIORITY_RULES)); renderCfgSort(); } return; }
+    if (btn && btn.id === 'rkCancel') { const ed = CFG.rankEdit; if (ed) $(ed.kind === 'tier' ? '#tierEditor' : '#prioEditor').hidden = true; CFG.rankEdit = null; return; }
+    if (btn && btn.id === 'rkOk') {
+      const ed = CFG.rankEdit; if (!ed) return;
+      ed.r.name = $('#rkName').value.trim() || '（無題）';
+      if (ed.kind === 'tier') ed.r.orderBy = $('#rkOrder').value; else ed.r.points = Number($('#rkPts').value || 0);
+      ed.r.cond = CondUI.get('condRank');
+      const list = ed.kind === 'tier' ? d.sortTiers : d.priorityRules;
+      if (ed.i === -1) list.push(ed.r); else list[ed.i] = ed.r;
+      CFG.rankEdit = null; renderCfgSort(); toast('確定しました（保存すると全員に反映されます）'); return;
     }
 
     /* ---- Slice ---- */
@@ -8824,7 +9786,7 @@ function bindEvents() {
 
     /* ---- 連絡用PDF・AI ---- */
     if (btn && btn.id === 'cpNow') {
-      busy(true, '連絡用PDFを作成中…');
+      busy(true, '連絡用ドキュメントを作成中…');
       try {
         const r = await api.buildContactPdfs();
         $('#cpResult').innerHTML = (r.files || []).length
@@ -8897,6 +9859,11 @@ function bindEvents() {
     if (fa) { e.stopPropagation(); focusAction(fa.dataset.id, fa.dataset.act); return; }
     const ta = e.target.closest('.task-act');
     if (ta) { e.stopPropagation(); taskAction(ta.dataset.id, ta.dataset.act); return; }
+    if (e.target.closest('.pomo-start')) { e.stopPropagation(); Pomo.start(); return; }
+    const wd = e.target.closest('.wait-done');
+    if (wd) { e.stopPropagation(); const t = S.tasks.find(x => x.id === wd.dataset.id); if (t) { t.status = 'Done'; localSave(t); renderCurrent(); toast('Done にしました'); } return; }
+    const wk = e.target.closest('.wait-keep');
+    if (wk) { e.stopPropagation(); const t = S.tasks.find(x => x.id === wk.dataset.id); if (t) { localSave(t); renderCurrent(); toast('まだ待ちます（1週間後にまた聞きます）'); } return; }
     const pb = e.target.closest('.pomo-btn');
     if (pb) { e.stopPropagation(); if (pb.dataset.p === 'stop') Pomo.stop(); else if (pb.dataset.p === 'pause') Pomo.pause(); else { Pomo.next(); Pomo.render(); } return; }
     const sh = e.target.closest('.share-btn');
@@ -9146,12 +10113,46 @@ function bindEvents() {
     if (pg) {
       if (pg.dataset.v === 'week') S.planMode = 'week';
       else { S.planMode = 'day'; S.planDate = pg.dataset.v.slice(4); }
+      if (S.yn && (S.planMode === 'week' || S.yn.date !== S.planDate)) S.yn = null;   // 別の日を開いたら、はい／いいえは中断
       renderPlan(); return;
     }
     const pd = e.target.closest('.plan-day');
     if (pd) { S.planMode = 'day'; S.planDate = pd.dataset.d; renderPlan(); return; }
     const pm = e.target.closest('.plan-move');
     if (pm) { const t = S.tasks.find(x => x.id === pm.dataset.id); if (t) { t.execDate = pm.dataset.d; localSave(t); renderPlan(); toast('「' + t.name.slice(0, 14) + '」を ' + pm.dataset.d + ' へ'); } return; }
+    if (e.target.id === 'hbNew') { openHabit(''); return; }
+    const hbt = e.target.closest('.hb-tpl');
+    if (hbt) { openHabit('', HABIT_TEMPLATES[Number(hbt.dataset.i)]); return; }
+    const hbt2 = e.target.closest('.hb-tpl2');
+    if (hbt2) { const t = HABIT_TEMPLATES[Number(hbt2.dataset.i)]; $('#hbName').value = t.name; $('#hbSlot').value = t.slot; $('#hbGoal').value = t.goalMin || ''; return; }
+    if (e.target.closest('[data-hb-close]')) { $('#hbModal').classList.add('hidden'); return; }
+    if (e.target.id === 'hbSave') { saveHabitUi(); return; }
+    if (e.target.id === 'hbArchive') { if (confirm('この習慣をしまいますか？（記録は残り、あとで再開できます）')) saveHabitUi({ active: false }); return; }
+    const hbr = e.target.closest('.hb-revive');
+    if (hbr) { api.saveHabit({ id: hbr.dataset.id, active: true }).then(h => { S.habits = S.habits.filter(x => x.id !== h.id).concat([h]); renderHabits(); toast('再開しました'); }).catch(err => toast('再開できませんでした: ' + (err.message || err), 'err')); return; }
+    const hbd = e.target.closest('.hb-day');
+    if (hbd) { S.habitDate = hbd.dataset.d === todayStr() ? '' : hbd.dataset.d; renderHabits(); return; }
+    const hbe = e.target.closest('.hb-edit');
+    if (hbe) { openHabit(hbe.dataset.hid); return; }
+    const hbc = e.target.closest('.hb-check');
+    if (hbc) { const d = S.habitDate || todayStr(), x = habitLogOf(hbc.dataset.id, d); setHabitLog(hbc.dataset.id, d, x && x.state === 'done' ? '' : 'done'); return; }
+    const hbs = e.target.closest('.hb-skip');
+    if (hbs) { const d = S.habitDate || todayStr(), x = habitLogOf(hbs.dataset.id, d); setHabitLog(hbs.dataset.id, d, x && x.state === 'skip' ? '' : 'skip'); return; }
+    const hbm = e.target.closest('.hb-timer');
+    if (hbm) { const h = S.habits.find(x => x.id === hbm.dataset.id); if (h) Pomo.start({ min: h.goalMin, label: h.name, habitId: h.id, date: S.habitDate || todayStr() }); return; }
+    const rg = e.target.closest('.resched-go');
+    if (rg) { renderReschedOut(rg.dataset.date, !!rg.dataset.yn); return; }
+    if (e.target.closest('.resched-ok')) { applyResched(); return; }
+    const ys = e.target.closest('.yn-start');
+    if (ys) { startYnPlan(ys.dataset.date || todayStr()); return; }
+    const ya = e.target.closest('.yn-ans');
+    if (ya && S.yn) { S.yn.ans[S.yn.queue[S.yn.idx]] = ya.dataset.a; S.yn.idx++; renderYn(); return; }
+    if (e.target.id === 'ynBack' && S.yn) { S.yn.idx = Math.max(0, S.yn.idx - 1); renderYn(); return; }
+    if (e.target.id === 'ynFinish' && S.yn) { S.yn.idx = S.yn.queue.length; renderYn(); return; }
+    if (e.target.id === 'ynRedo' && S.yn) { S.yn.idx = 0; S.yn.step = 'ask'; S.yn.ai = null; renderYn(); return; }
+    if (e.target.id === 'ynQuit' && S.yn) { S.yn = null; renderPlan(); return; }
+    if (e.target.id === 'ynAi' && S.yn) { ynAskAi(); return; }
+    if (e.target.id === 'ynCommit' && S.yn) { ynCommit(); return; }
     if (e.target.id === 'btnPlanCommit') { commitPlan(e.target.dataset.date); return; }
     if (e.target.id === 'btnPlanAi') { askAiPlan(e.target.dataset.date, false); return; }
     if (e.target.id === 'btnPlanAiWeek') { askAiPlan(todayStr(), true); return; }
@@ -9160,6 +10161,16 @@ function bindEvents() {
     if (sr) { openSchedule(sr.dataset.sid); return; }
     const nm = e.target.closest('.notes-mode');
     if (nm) { S.notesMode = nm.dataset.m; renderNotes(); return; }
+    const ma = e.target.closest('.memo-archive');
+    if (ma) { archiveMemosUi([ma.dataset.mid]); return; }
+    const mr = e.target.closest('.memo-restore');
+    if (mr) { restoreMemosUi([mr.dataset.mid]); return; }
+    if (e.target.id === 'memoArchReload') { S.memoArchive = null; renderNotes(); return; }
+    if (e.target.id === 'memoArchDone') {
+      const ids = $$('#notesBody .memo-archive').map(b => b.dataset.mid).filter(id => { const t = S.tasks.find(x => x.id === id); return t && t.status === 'Done'; });
+      if (ids.length && confirm('Done のメモ ' + ids.length + '件をメモアーカイブ（別シート）へ移します。あとで「📦 アーカイブ」から戻せます。')) archiveMemosUi(ids);
+      return;
+    }
     if (e.target.id === 'btnRuleCheck') {
       busy(true, '🤖 マイルール・考え方を読んでいます…');
       try { const r = await api.aiCheckRules(); await loadNotices(); renderRules();
@@ -9169,7 +10180,9 @@ function bindEvents() {
     }
   });
   document.addEventListener('change', e => {
-    if (e.target.id === 'planDate') { S.planMode = 'day'; S.planDate = e.target.value || todayStr(); renderPlan(); }
+    if (e.target.id === 'planDate') { S.planMode = 'day'; S.planDate = e.target.value || todayStr(); if (S.yn && S.yn.date !== S.planDate) S.yn = null; renderPlan(); }
+    if (e.target.id === 'ynPushNo' && S.yn) { S.yn.pushNo = e.target.checked; }
+    if (e.target.id === 'notesProj') { S.notesProj = e.target.value; renderNotes(); }
   });
   document.addEventListener('input', e => {
     if (e.target.id === 'notesQ' && !e.isComposing) { S.notesQ = e.target.value; const pos = e.target.selectionStart; renderNotes(); const el = $('#notesQ'); el.focus(); el.setSelectionRange(pos, pos); }
@@ -9270,6 +10283,14 @@ function bindEvents() {
     if (clr) { e.preventDefault(); clearField(clr.dataset.clear); scheduleDraftSave(); return; }
     const ab = e.target.closest('.asap-btn');
     if (ab) { $('#mAsap').value = ab.dataset.v; syncAsapButtons(); scheduleDraftSave(); return; }
+    const mk = e.target.closest('.m-kind');
+    if (mk) {
+      const g = $('#mGtd');
+      if (mk.dataset.k === 'memo') { if (!isAreaLike(g.value)) g.value = 'Resources'; }
+      else if (isAreaLike(g.value)) g.value = '00_INBOX';
+      applyModalGtdMode(); scheduleDraftSave(); return;
+    }
+    if (e.target.closest('.as-all')) { e.preventDefault(); renderAssigneeHits('*'); return; }
     const ah = e.target.closest('.as-hit');
     if (ah) { $('#mAssignee').value = ah.dataset.v; renderAssigneeHits(''); syncClearButtons($('#modal')); scheduleDraftSave(); return; }
     if (e.target.closest('[data-open-places]')) { openCfg('places'); return; }
