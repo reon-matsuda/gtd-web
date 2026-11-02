@@ -54,6 +54,12 @@
     #stickyTop{ position:-webkit-sticky; position:sticky; top:0; z-index:30;
       transition:transform .22s cubic-bezier(.22,.61,.36,1); will-change:transform; }
     #stickyTop.hdr-hidden{ transform:translateY(-100%); }
+    /* スマホ（タッチ）：上の欄はふだんしまっておき、左下のボタンを押したときだけ出す（2026-11-02）。
+       sticky のままだと隠しても場所を取るので、fixed にして本文を上まで使う。出したときは本文の上に重ねる */
+    html.hdr-touch #stickyTop{ position:fixed; left:0; right:0; top:0; max-height:100vh; overflow-y:auto; box-shadow:0 6px 16px rgba(15,23,42,.12); }
+    html.hdr-touch #stickyTop.hdr-hidden{ box-shadow:none; }
+    #hdrToggle{ display:none; }
+    html.hdr-touch #hdrToggle{ display:flex; }
     /* 収納中は上端に細い手がかりを出す（マウスがある環境だけ）。
        何も出ていないと「戻し方が分からない」ので、ここへカーソルを寄せれば
        戻ることを示す。カーソル判定の邪魔をしないよう pointer-events は切る。 */
@@ -73,6 +79,16 @@
        hidden 属性を付けても .flex のラベルが消えず、絞り込みが効かない原因になる。
        ここで !important を付けて、hidden 属性を常に最優先にする。 */
     [hidden], .is-hidden{ display:none !important; }
+    /* 🌳 フォルダツリー：エクスプローラーのような点線のつなぎ線 */
+    .ftree, .ftree ul{ list-style:none; margin:0; padding:0; }
+    .ftree ul{ margin-left:7px; padding-left:10px; border-left:1px dotted #94a3b8; }
+    .ftree li{ position:relative; }
+    .ftree{ --ft-row:24px; }
+    .ftree ul > li::before{ content:''; position:absolute; left:-10px; top:calc(var(--ft-row) / 2); width:9px; border-top:1px dotted #94a3b8; }
+    .ftree .ft-row{ min-height:var(--ft-row); }
+    .ftree .ft-go{ min-height:var(--ft-row) !important; }
+    .ftree .ft-tog{ min-height:0 !important; height:18px; width:18px; border-radius:2px; }
+    @media (max-width: 639px){ .ftree{ --ft-row:34px; } }   /* スマホは指で押しやすい高さに */
     /* ⚠️ flexの子をスクロールさせるときは min-height:0 が要る。
        これが無いと中身の高さまで伸びて親（overflow:hidden）をはみ出し、
        入力欄へフォーカスが移った拍子にブラウザが親ごとスクロールして、
@@ -750,7 +766,10 @@
     <div class="space-y-3">
       <div><label class="lbl">フォルダ名</label><input id="pName" class="inp"></div>
       <div><label class="lbl" for="pParent">📁 入れる場所（親フォルダ）</label>
-        <select id="pParent" class="inp"></select>
+        <input id="pParentQ" type="search" class="inp mb-1" autocomplete="off" placeholder="フォルダ名で探す（上の階層の名前でも・スペースで絞り込み）">
+        <div id="pParentList" class="max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1"></div>
+        <p id="pParentNow" class="mt-1 text-[11px] text-slate-600"></p>
+        <select id="pParent" class="hidden" aria-hidden="true" tabindex="-1"></select>
         <p class="mt-1 text-[11px] text-slate-400">フォルダの中にフォルダを何段でも入れられます。親フォルダの参加者は、この中も見られます。</p></div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="lbl">開始日</label><input id="pStart" type="date" class="inp"></div>
@@ -893,6 +912,7 @@
 </div>
 
 <!-- ===================== 新規作成FAB（スマホ） ===================== -->
+<button id="hdrToggle" type="button" class="fixed bottom-20 left-4 z-40 h-11 w-11 items-center justify-center rounded-full border border-slate-300 bg-white/95 text-lg text-slate-700 shadow-lg sm:hidden" aria-label="検索・タブ・絞込を出す">🔍</button>
 <button id="fab" class="fixed bottom-20 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-indigo-600 text-2xl font-bold text-white shadow-lg hover:bg-indigo-700 sm:hidden"
         style="margin-bottom:env(safe-area-inset-bottom)">＋</button>
 
@@ -2427,7 +2447,7 @@ function legacyFilterToCond(f) {
 const TODAY_LIMIT_DAYS = 30;
 const DEFAULT_SORT_TIERS = [
   { id: 'tNow',     name: '今すぐやる',                    orderBy: '',        cond: { g: 'and', items: [{ f: 'gtd', op: 'in', v: ['01-1_今すぐやる'] }] } },
-  { id: 'tTime',    name: '時刻が来た時間指定タスク',       orderBy: 'exec',    cond: { g: 'and', items: [{ f: 'timeReached', op: 'true' }] } },
+  { id: 'tTime',    name: '時刻が来た時間指定タスク（実行日が今日か未入力）',       orderBy: 'exec',    cond: { g: 'and', items: [{ f: 'timeReached', op: 'true' }] } },
   { id: 'tOver',    name: '期限超過（超過している順）',     orderBy: 'overdue', cond: { g: 'and', items: [{ f: 'overdue', op: 'true' }] } },
   { id: 'tHardDay', name: '絶対期限が今日',                 orderBy: '',        cond: { g: 'and', items: [{ f: 'hardDue', op: 'eq', v: ['today'] }] } },
   { id: 'tContact', name: '連絡する・依頼する',             orderBy: '',        cond: { g: 'and', items: [{ f: 'gtd', op: 'in', v: ['03-1_連絡する・依頼する'] }] } },
@@ -2443,12 +2463,13 @@ const DEFAULT_PRIORITY_RULES = [
 const TIER_ORDER_BY = [['', '並べ方の指定なし'], ['hardDue', '絶対期限が早い順'], ['overdue', '期限を過ぎている日数が多い順'],
                        ['due', '目標期限が早い順'], ['exec', '実行日・時刻が早い順'], ['created', '登録が古い順']];
 
-/** 時間指定タスクの時刻が来たか（実行日が過去、または今日で開始〔なければ終了〕時刻を過ぎた） */
+/** 時間指定タスクの時刻が来たか：実行日が【今日か未入力】で、開始（なければ終了）時刻を過ぎたもの。
+    2026-11-02：実行日が過去・未来のものは含めない（何日も前の時間指定が、いつまでも②の段に居座っていたため）
+    2026-11-03：実行日が未入力のものは「毎日その時刻が来たら」として含める */
 function timeReached(t) {
-  if (!t.hasTime || !t.execDate || t.status === 'Done') return false;
+  if (!t.hasTime || t.status === 'Done') return false;
   const today = todayStr();
-  if (t.execDate < today) return true;
-  if (t.execDate > today) return false;
+  if (t.execDate && t.execDate !== today) return false;
   const hm = String(t.startTime || t.endTime || '').slice(0, 5);
   if (!hm) return false;
   const d = new Date();
@@ -3441,11 +3462,66 @@ const PROJ_SORTS = [
 /** 日付の昇順比較（空欄は常に最後） */
 const byDateAsc = (a, b) => (a ? a : '9999-99-99').localeCompare(b ? b : '9999-99-99');
 
+/* -------------------------------------------------------------------------
+ * 🌳 フォルダツリー（エクスプローラーの左側のように、⊞／⊟ で開いて閉じる）
+ * -------------------------------------------------------------------------
+ * 開いているフォルダは端末に覚えておく（gtdFoldOpen）。選んだフォルダの親は自動で開く。
+ * 検索中は、当たったフォルダとその親だけを出して、全部開いた状態にする。
+ */
+const FOLD_OPEN_KEY = 'gtdFoldOpen_v1';
+function foldOpenMap() {
+  if (!S.foldOpen) { try { S.foldOpen = JSON.parse(localStorage.getItem(FOLD_OPEN_KEY) || '{}') || {}; } catch (e) { S.foldOpen = {}; } }
+  return S.foldOpen;
+}
+function foldOpenSave() { try { localStorage.setItem(FOLD_OPEN_KEY, JSON.stringify(S.foldOpen || {})); } catch (e) {} }
+function folderTreeHtml(selId, terms) {
+  const open = foldOpenMap();
+  // 選んでいるフォルダの親はすべて開く（どこにいるか見失わないように）
+  let cur = S.projMap[selId], g = 0;
+  while (cur && g++ < 50) { const pid = folderParent(cur); if (pid) open[pid] = true; cur = S.projMap[pid]; }
+  let show = null;                                       // 検索中に出すフォルダ（当たったもの＋その親）
+  if (terms.length) {
+    show = {};
+    S.projects.forEach(p => {
+      if (!matchTerms(p.name + SEARCH_SEP + (p.goal || ''), terms)) return;
+      let c = p, k = 0; while (c && k++ < 50) { show[c.id] = true; c = S.projMap[folderParent(c)]; }
+    });
+  }
+  const openCount = id => { const sub = folderSubtree(id); return S.tasks.filter(t => sub[t.project] && t.status !== 'Done').length; };
+  const node = (p, depth, seen) => {
+    if (seen[p.id] || (show && !show[p.id])) return '';
+    seen[p.id] = true;
+    const kids = folderChildren(p.id).filter(c => !show || show[c.id]).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ja'));
+    const isOpen = !!(show || open[p.id]);
+    const n = openCount(p.id);
+    return '<li>' +
+      '<div class="ft-row flex items-center gap-1 rounded py-0.5 pr-1 ' + (p.id === selId ? 'bg-indigo-100 text-indigo-900' : 'hover:bg-slate-100') + '">' +
+        (kids.length
+          ? '<button type="button" class="ft-tog flex h-4 w-4 shrink-0 items-center justify-center border border-slate-400 bg-white text-[11px] leading-none text-slate-600" data-fid="' + esc(p.id) + '" aria-label="' + (isOpen ? '閉じる' : '開く') + '">' + (isOpen ? '−' : '＋') + '</button>'
+          : '<span class="inline-block h-4 w-4 shrink-0"></span>') +
+        '<button type="button" class="ft-go flex min-w-0 flex-1 items-center gap-1 text-left text-[13px]" data-fid="' + esc(p.id) + '">' +
+          '<span aria-hidden="true">' + (isOpen && kids.length ? '📂' : '📁') + '</span>' +
+          '<span class="truncate' + (p.status === 'Done' ? ' text-slate-400 line-through' : '') + '">' + esc(p.name || '（名称未設定）') + '</span>' +
+          (n ? '<span class="ml-auto shrink-0 rounded-full bg-slate-100 px-1.5 text-[10px] tabular-nums text-slate-500">' + n + '</span>' : '') +
+        '</button></div>' +
+      (kids.length && isOpen ? '<ul>' + kids.map(c => node(c, depth + 1, seen)).join('') + '</ul>' : '') +
+    '</li>';
+  };
+  const roots = folderChildren('').sort((a, b) => String(a.name).localeCompare(String(b.name), 'ja'));
+  const noneN = S.tasks.filter(t => !t.project && t.status !== 'Done').length;
+  return '<ul class="ftree">' +
+    '<li><div class="ft-row flex items-center gap-1 rounded py-0.5 pr-1 ' + (!selId ? 'bg-indigo-100 text-indigo-900' : 'hover:bg-slate-100') + '">' +
+      '<span class="inline-block h-4 w-4 shrink-0"></span><button type="button" class="ft-go flex flex-1 items-center gap-1 text-left text-[13px] font-semibold" data-fid="">🗂 すべて' +
+      (noneN ? '<span class="ml-auto rounded-full bg-slate-100 px-1.5 text-[10px] font-normal text-slate-500" title="フォルダなしの未完了">' + noneN + '</span>' : '') + '</button></div>' +
+      '<ul>' + (roots.map(p => node(p, 0, {})).join('') || '<li class="py-2 text-[11px] text-slate-400">' + (terms.length ? '見つかりません' : 'フォルダがありません') + '</li>') + '</ul></li>' +
+  '</ul>';
+}
+
 function renderProjects() {
   const terms = searchTerms(S.projQ || '');
   if (S.folderAt && !S.projMap[S.folderAt]) S.folderAt = '';          // 消えたフォルダにいたら一番上へ
   const here = S.folderAt || '';
-  // 検索中は全階層から探す（道筋＝親フォルダの名前でも当たる）。普段は今いるフォルダの直下だけ
+  // 右側：検索中は全階層から当たったもの、普段は今いるフォルダの直下
   const base = terms.length
     ? S.projects.filter(p => matchTerms(folderPath(p.id).join(SEARCH_SEP) + SEARCH_SEP + (p.goal || ''), terms))
     : folderChildren(here);
@@ -3482,12 +3558,9 @@ function renderProjects() {
       '<button id="projNew" class="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">＋ フォルダ' + (here ? '（この中に）' : '') + '</button>' +
       (here ? '<button id="foldTaskNew" class="shrink-0 rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">＋ タスク（この中に）</button>' +
               '<button class="proj-edit shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-50" data-pid="' + esc(here) + '">✎ このフォルダを編集</button>' : '') +
-      '<input id="projQ" type="search" class="w-44 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" ' +
-        'placeholder="フォルダを探す（全階層）" value="' + esc(S.projQ || '') + '">' +
       '<select id="projSort" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-600">' +
         PROJ_SORTS.map(o => '<option value="' + o[0] + '"' + (key === o[0] ? ' selected' : '') + '>並び: ' + o[1] + '</option>').join('') +
       '</select>' +
-      (S.projQ ? '<button id="projClear" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-500 hover:bg-slate-50">検索をやめる</button>' : '') +
     '</div></div>';
 
   const card = p => {
@@ -3524,25 +3597,38 @@ function renderProjects() {
 
   // 今いるフォルダに直接入っているタスク（中のフォルダの分は、そのフォルダを開くと見える）
   let taskHtml = '';
-  if (here && !terms.length) {
-    const own = S.tasks.filter(t => t.project === here && t.status !== 'Done').sort(sorter());
-    const doneN = S.tasks.filter(t => t.project === here && t.status === 'Done').length;
-    taskHtml = '<h3 class="mb-1 mt-4 text-xs font-bold text-slate-500">📄 このフォルダのタスク・メモ（' + own.length + '件' + (doneN ? '／Done ' + doneN + '件' : '') + '）</h3>' +
-      (own.length ? '<div class="space-y-1">' + own.map(t =>
+  if (!terms.length) {
+    const inHere = t => here ? t.project === here : !t.project;
+    const own = S.tasks.filter(t => inHere(t) && t.status !== 'Done').sort(sorter());
+    const doneN = S.tasks.filter(t => inHere(t) && t.status === 'Done').length;
+    const shown = own.slice(0, 200);
+    taskHtml = '<h3 class="mb-1 mt-4 text-xs font-bold text-slate-500">📄 ' + (here ? 'このフォルダ' : 'フォルダに入っていない') + 'のタスク・メモ（' + own.length + '件' + (doneN ? '／Done ' + doneN + '件' : '') + '）</h3>' +
+      (shown.length ? '<div class="space-y-1">' + shown.map(t =>
         '<div class="flex items-center gap-1.5 rounded-lg bg-white px-2 py-1.5 ring-1 ring-slate-100">' +
           '<span class="min-w-0 flex-1 cursor-pointer truncate text-xs open-task" data-id="' + esc(t.id) + '">' +
             (isAreaLike(t.gtd) ? '🗒 ' : '') + (t.importance === '高' ? '🚩 ' : '') + (t.repeatRule ? '🔁 ' : '') + esc(t.name) + '</span>' +
           (t.hardDue ? '<span class="shrink-0 rounded bg-rose-50 px-1 text-[10px] font-semibold text-rose-700" title="絶対期限">⛔' + t.hardDue.slice(5) + '</span>' : '') +
           (t.due ? '<span class="shrink-0 text-[10px] text-slate-400" title="目標期限">' + t.due.slice(5) + '</span>' : '') +
-        '</div>').join('') + '</div>'
-        : '<p class="rounded-lg bg-white py-4 text-center text-[11px] text-slate-400 ring-1 ring-slate-100">このフォルダに直接入っているタスクはありません</p>');
+        '</div>').join('') + (own.length > shown.length ? '<p class="py-1 text-[11px] text-slate-400">ほか ' + (own.length - shown.length) + '件（タスク一覧で見られます）</p>' : '') + '</div>'
+        : '<p class="rounded-lg bg-white py-4 text-center text-[11px] text-slate-400 ring-1 ring-slate-100">直接入っているタスクはありません</p>');
   }
 
-  $('#projBody').innerHTML =
-    (list.length || !here || terms.length ? '<div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">' +
-      (list.map(card).join('') || '<p class="col-span-full py-10 text-center text-sm text-slate-400">' +
-        (terms.length ? '見つかりませんでした' : 'フォルダがありません。「＋ フォルダ」で作れます') + '</p>') + '</div>' : '') +
+  const right = (list.length || !here || terms.length ? '<div class="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">' +
+      (list.map(card).join('') || '<p class="col-span-full py-6 text-center text-sm text-slate-400">' +
+        (terms.length ? '見つかりませんでした' : (here ? '中のフォルダはありません' : 'フォルダがありません。「＋ フォルダ」で作れます')) + '</p>') + '</div>' : '') +
     taskHtml;
+  const treeHidden = !!S.treeHidden;
+  // 左：ツリー（スマホでは上に置き、隠せる）／右：選んだフォルダの中身
+  $('#projBody').innerHTML = '<div class="grid gap-3 lg:grid-cols-[19rem_minmax(0,1fr)]">' +
+    '<aside class="rounded-xl bg-white p-2 shadow-sm ring-1 ring-slate-200 lg:sticky lg:top-2 lg:max-h-[calc(100vh-1rem)] lg:self-start lg:overflow-y-auto">' +
+      '<div class="mb-1 flex items-center gap-1.5">' +
+        '<input id="projQ" type="search" class="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" placeholder="フォルダを探す（全階層）" value="' + esc(S.projQ || '') + '">' +
+        '<button type="button" class="ft-all rounded border border-slate-300 px-1.5 py-1 text-[10px] text-slate-600" data-a="close" title="全部閉じる">⊟</button>' +
+        '<button type="button" class="ft-hide rounded border border-slate-300 px-1.5 py-1 text-[10px] text-slate-600 lg:hidden">' + (treeHidden ? '🌳 ツリーを出す' : '隠す') + '</button>' +
+      '</div>' +
+      (treeHidden ? '' : '<div class="ftree-wrap max-h-[55vh] overflow-auto lg:max-h-none">' + folderTreeHtml(here, terms) + '</div>') +
+    '</aside>' +
+    '<section class="min-w-0">' + right + '</section></div>';
 }
 
 /* =========================================================================
@@ -4265,20 +4351,44 @@ const Pomo = {
  * ただし勝手に Done にはせず、ユーザーに選ばせる。
  * 「まだ待つ」を押すと更新日時が今日になり、1週間後にまた聞く。
  */
+/* 「まだ待つ」を押したタスクは、押した日から1週間は聞かない（2026-11-03）。
+   以前は「更新日時を今日にする」ことで1週間後に回していたが、手元の更新日時が変わらず
+   一覧から消えなかった。また、カレンダー同期などで更新日時が動くと判定がずれる。
+   → 「いつまで聞かないか」をタスクごとに端末をまたいで覚える（userState.waitKeep = { タスクID: 'yyyy-mm-dd' }） */
+function waitKeepMap() { return (S.userState && S.userState.waitKeep) || {}; }
 function waitingStale() {
-  const lim = addDays(todayStr(), -7);
-  return S.tasks.filter(t => t.gtd === '03-2_連絡待ち' && t.status !== 'Done' && String(t.updated || '').slice(0, 10) <= lim);
+  const today = todayStr(), lim = addDays(today, -7);
+  const keep = waitKeepMap();
+  return S.tasks.filter(t => t.gtd === '03-2_連絡待ち' && t.status !== 'Done' && String(t.updated || '').slice(0, 10) <= lim &&
+    !(keep[t.id] && keep[t.id] > today));
+}
+/** ids を「まだ待つ」にする（1週間後まで聞かない）。終わった・消えたタスクと期限切れの記録は掃除する */
+function waitKeep(ids) {
+  const today = todayStr(), until = addDays(today, 7);
+  const alive = {}; S.tasks.forEach(t => { if (t.gtd === '03-2_連絡待ち' && t.status !== 'Done') alive[t.id] = true; });
+  const m = {};
+  Object.keys(waitKeepMap()).forEach(id => { const d = waitKeepMap()[id]; if (alive[id] && d > today) m[id] = d; });
+  ids.forEach(id => { m[id] = until; });
+  S.userState = S.userState || {};
+  S.userState.waitKeep = m;
+  saveCache();
+  api.saveUserState({ waitKeep: m }).catch(() => {});
+  renderCurrent();
+  toast(ids.length > 1 ? ids.length + '件をまだ待ちます（' + until.slice(5) + ' にまた聞きます）' : 'まだ待ちます（' + until.slice(5) + ' にまた聞きます）');
 }
 function waitingAskHtml() {
   const list = waitingStale();
   if (!list.length) return '';
   return '<div class="mb-3 rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200">' +
     '<p class="text-xs font-bold text-amber-900">⏳ 連絡待ちのまま1週間たったもの（' + list.length + '件）— もう Done にしますか？</p>' +
-    list.slice(0, 20).map(t => '<div class="mt-1.5 flex items-center gap-2 text-sm">' +
-      '<span class="min-w-0 flex-1 cursor-pointer truncate open-task" data-id="' + esc(t.id) + '">' + esc(t.name) +
+    // ボタンはタスク名のすぐ右に置く（右端に離すと、どの行のボタンか分からなくなるため。2026-11-02）
+    list.slice(0, 20).map(t => '<div class="mt-1.5 flex items-center gap-1.5 text-sm">' +
+      '<span class="min-w-0 max-w-[65%] cursor-pointer truncate open-task" data-id="' + esc(t.id) + '">' + esc(t.name) +
         (t.assignee ? ' <span class="text-[11px] text-slate-500">（' + esc(t.assignee) + '）</span>' : '') + '</span>' +
-      '<button class="wait-done shrink-0 rounded bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white" data-id="' + esc(t.id) + '">Done</button>' +
-      '<button class="wait-keep shrink-0 rounded border border-amber-400 bg-white px-2 py-1 text-[11px]" data-id="' + esc(t.id) + '">まだ待つ</button></div>').join('') +
+      '<button class="wait-done shrink-0 rounded bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white" data-id="' + esc(t.id) + '">Done</button>' +
+      '<button class="wait-keep shrink-0 rounded border border-amber-400 bg-white px-2 py-0.5 text-[11px]" data-id="' + esc(t.id) + '">まだ待つ</button></div>').join('') +
+    (list.length > 20 ? '<p class="mt-1.5 text-[11px] text-amber-800">ほか ' + (list.length - 20) + '件（上を片付けると次が出ます）</p>' : '') +
+    (list.length > 1 ? '<button class="wait-keep-all mt-2 rounded border border-amber-400 bg-white px-2 py-1 text-[11px]" data-ids="' + esc(list.slice(0, 20).map(t => t.id).join(',')) + '">表示中の' + Math.min(20, list.length) + '件をまとめて「まだ待つ」</button>' : '') +
   '</div>';
 }
 
@@ -8701,6 +8811,9 @@ function openProject(pid, opts) {
   const par = isNew ? (o.parent || '') : folderParent(p);
   $('#pParent').innerHTML = '<option value="">（いちばん上）</option>' + folderOptionsHtml(par, isNew ? '' : pid);
   $('#pParent').value = par;
+  $('#pParentQ').value = '';
+  $('#pmodal').dataset.exclude = isNew ? '' : pid;
+  renderParentPicker();
   renderAxisDatalists();
   $('#pMajor').value = p.major || ''; $('#pMiddle').value = p.middle || ''; $('#pMinor').value = p.minor || '';
   $('#pName').value = p.name; $('#pStart').value = p.start; $('#pEnd').value = p.end;
@@ -8716,6 +8829,26 @@ function openProject(pid, opts) {
   $('#pmodal').classList.remove('hidden');
   PBASE = projectFormSig();
   setTimeout(() => { $('#pName').focus(); if (isNew && $('#pName').value) $('#pName').select(); }, 50);
+}
+
+/**
+ * 親フォルダの選び方（2026-11-02）：プルダウンだと探せないので、検索欄＋木の一覧にした。
+ * 検索していないときは字下げの木、検索中は「親 › 子」の道筋で当たったものだけ。
+ * 自分自身と自分の中のフォルダは出さない（輪になるため）。値は隠した #pParent に入れる。
+ */
+function renderParentPicker() {
+  const box = $('#pParentList');
+  if (!box) return;
+  const cur = $('#pParent').value || '';
+  const ex = $('#pmodal').dataset.exclude ? folderSubtree($('#pmodal').dataset.exclude) : {};
+  const terms = searchTerms($('#pParentQ').value || '');
+  const items = folderTreeList().filter(x => !ex[x.p.id] && (!terms.length || matchTerms(folderPath(x.p.id).join(SEARCH_SEP), terms)));
+  const row = (id, label, depth) => '<button type="button" class="pp-pick flex w-full items-center gap-1 truncate rounded px-2 py-1 text-left text-xs ' +
+    (id === cur ? 'bg-indigo-100 font-semibold text-indigo-900' : 'text-slate-700 hover:bg-slate-50') + '" data-id="' + esc(id) + '" style="padding-left:' + (8 + depth * 14) + 'px">' + label + '</button>';
+  box.innerHTML = (terms.length ? '' : row('', '🗂 （いちばん上）', 0)) +
+    (items.slice(0, 300).map(x => row(x.p.id, '📁 ' + esc(terms.length ? folderPathStr(x.p.id) : x.p.name), terms.length ? 0 : x.depth + 1)).join('') ||
+      '<p class="px-2 py-2 text-[11px] text-slate-400">見つかりません</p>');
+  $('#pParentNow').innerHTML = '選んでいる場所：<b>' + esc(cur ? folderPathStr(cur) : 'いちばん上') + '</b>';
 }
 
 async function saveProject() {
@@ -8857,7 +8990,6 @@ const OP_BARS = {
   focus: 'focusSliceBar',
   kanban: 'kanbanTools',
   gantt: 'ganttTools',
-  projects: 'projTools',
   all: 'allTools'
 };
 
@@ -8896,8 +9028,11 @@ const HDR = {
     document.documentElement.style.setProperty('--hdr-h', this.el.offsetHeight + 'px');
   },
 
-  show() {
+  touch: false,         // スマホ（タッチ）か。true なら上の欄は「ボタンで出したときだけ」
+  /** force：ボタンで出すとき。スマホでは、それ以外（画面の切り替えなど）からは出さない */
+  show(force) {
     if (!this.el) return;
+    if (this.touch && !force) { this.measure(); return; }
     if (this.hidden) {
       this.hidden = false;
       this.el.classList.remove('hdr-hidden');
@@ -8911,6 +9046,23 @@ const HDR = {
     this.hidden = true;
     this.el.classList.add('hdr-hidden');
     document.documentElement.classList.add('hdr-tucked');
+    this.syncToggle();
+  },
+  /** 左下のボタンの表示：しまっている＝🔍、出ている＝✕ */
+  syncToggle() {
+    const b = document.getElementById('hdrToggle');
+    if (b) { b.textContent = this.hidden ? '🔍' : '✕'; b.setAttribute('aria-label', this.hidden ? '検索・タブ・絞込を出す' : '上の欄をしまう'); }
+  },
+  toggle() {
+    if (this.hidden) { this.show(true); window.scrollBy(0, 0); } else this.hide();
+    this.syncToggle();
+  },
+  setTouch(on) {
+    this.touch = !!on;
+    document.documentElement.classList.toggle('hdr-touch', this.touch);
+    if (this.touch) { clearTimeout(this.autoTimer); this.hide(); }
+    else this.show();
+    this.syncToggle();
   },
 
   /** 隠してはいけない状況か */
@@ -8955,6 +9107,7 @@ const HDR = {
   idleMs() { return this.isDesktop ? this.PC_IDLE : this.AUTO_STOP; },
 
   armAutoHide(ms) {
+    if (this.touch) return;                      // スマホは自動では出し入れしない（ボタンで出し、下へスクロールでしまう）
     this.autoMs = ms || this.idleMs();
     clearTimeout(this.autoTimer);
     this.autoTimer = setTimeout(() => {
@@ -8972,6 +9125,11 @@ const HDR = {
     const d = y - this.last;
     this.last = y;
 
+    if (this.touch) {
+      // スマホ：出ているときに下へスクロールしたらしまう。上へ戻しても勝手には出さない
+      if (!this.hidden && d > 8 && !this.blocked()) this.hide();
+      return;
+    }
     if (this.isDesktop) {
       // PCは方向を問わず表示したまま。止まってから10秒数え直す。
       this.show();
@@ -9022,12 +9180,15 @@ const HDR = {
     try {
       this.isDesktop = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
       const mq = window.matchMedia('(hover: hover) and (pointer: fine)');
-      const onChange = e => { this.isDesktop = e.matches; this.show(); this.armAutoHide(); };
+      const onChange = e => { this.isDesktop = e.matches; this.setTouch(!e.matches); this.armAutoHide(); };
       if (mq.addEventListener) mq.addEventListener('change', onChange);
       else if (mq.addListener) mq.addListener(onChange);
     } catch (e) { this.isDesktop = false; }
 
     this.syncOpBar();
+    this.setTouch(!this.isDesktop);
+    const tg = document.getElementById('hdrToggle');
+    if (tg) tg.addEventListener('click', e => { e.stopPropagation(); this.toggle(); });
     window.addEventListener('scroll', () => {
       if (this.ticking) return;
       this.ticking = true;
@@ -9075,6 +9236,8 @@ function anyModalOpen() {
 function syncFab() {
   const f = $('#fab');
   if (f) f.hidden = anyModalOpen();
+  const hg = $('#hdrToggle');
+  if (hg) hg.hidden = anyModalOpen();
   const bn = $('#bottomNav');
   if (bn) bn.hidden = anyModalOpen();      // ボトムナビも隠してモーダルを全画面で使う
 }
@@ -9320,11 +9483,14 @@ function bindEvents() {
     const again = $('#projQ');
     if (again && again !== inp) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
   };
-  $('#opSlot').addEventListener('input', e => {
+  // 検索欄はツリーの上（本文）に移ったので、文書全体で受ける
+  document.addEventListener('input', e => {
+    if (e.target.id === 'pParentQ' && !e.isComposing) { renderParentPicker(); return; }
     if (e.target.id !== 'projQ' || e.isComposing) return;
     projQFilter(e.target);
   });
-  $('#opSlot').addEventListener('compositionend', e => {
+  document.addEventListener('compositionend', e => {
+    if (e.target.id === 'pParentQ') renderParentPicker();
     if (e.target.id === 'projQ') projQFilter(e.target);
   });
 
@@ -9553,6 +9719,18 @@ function bindEvents() {
     if (e.target.id === 'projNew') { openProject('', { parent: S.folderAt || '' }); return; }
     if (e.target.id === 'foldTaskNew') { openTask(null, { preset: { project: S.folderAt || '' } }); return; }
     if (e.target.id === 'projClear') { S.projQ = ''; S.projCats = []; renderProjects(); return; }
+    const ppk = e.target.closest('.pp-pick');
+    if (ppk) { $('#pParent').value = ppk.dataset.id; renderParentPicker(); return; }
+    const ftt = e.target.closest('.ft-tog');
+    if (ftt) { const m = foldOpenMap(); m[ftt.dataset.fid] = !m[ftt.dataset.fid]; foldOpenSave(); renderProjects(); return; }
+    const ftg = e.target.closest('.ft-go');
+    if (ftg) {
+      S.folderAt = ftg.dataset.fid || ''; S.projQ = '';
+      if (S.folderAt && folderChildren(S.folderAt).length) { foldOpenMap()[S.folderAt] = true; foldOpenSave(); }   // 選んだら中も開く
+      renderProjects(); return;
+    }
+    if (e.target.closest('.ft-all')) { S.foldOpen = {}; foldOpenSave(); renderProjects(); return; }
+    if (e.target.closest('.ft-hide')) { S.treeHidden = !S.treeHidden; renderProjects(); return; }
     const fg = e.target.closest('.fold-go');
     if (fg) { S.folderAt = fg.dataset.fid || ''; S.projQ = ''; renderProjects(); window.scrollTo(0, 0); return; }
     const pc = e.target.closest('.proj-card');
@@ -9863,7 +10041,9 @@ function bindEvents() {
     const wd = e.target.closest('.wait-done');
     if (wd) { e.stopPropagation(); const t = S.tasks.find(x => x.id === wd.dataset.id); if (t) { t.status = 'Done'; localSave(t); renderCurrent(); toast('Done にしました'); } return; }
     const wk = e.target.closest('.wait-keep');
-    if (wk) { e.stopPropagation(); const t = S.tasks.find(x => x.id === wk.dataset.id); if (t) { localSave(t); renderCurrent(); toast('まだ待ちます（1週間後にまた聞きます）'); } return; }
+    if (wk) { e.stopPropagation(); waitKeep([wk.dataset.id]); return; }
+    const wka = e.target.closest('.wait-keep-all');
+    if (wka) { e.stopPropagation(); waitKeep(wka.dataset.ids.split(',').filter(Boolean)); return; }
     const pb = e.target.closest('.pomo-btn');
     if (pb) { e.stopPropagation(); if (pb.dataset.p === 'stop') Pomo.stop(); else if (pb.dataset.p === 'pause') Pomo.pause(); else { Pomo.next(); Pomo.render(); } return; }
     const sh = e.target.closest('.share-btn');
