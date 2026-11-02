@@ -1876,7 +1876,44 @@ const api = new Proxy({}, {
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const todayStr = () => { const d = new Date(); return d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2); };
+/* ---- アプリの時計（2026-11-03）----
+   「今日」「いま何時か」は、端末の国ではなく【アプリのタイムゾーン】（＝サーバーの Apps Script の設定）で数える。
+   海外で端末の時計が現地時間でも日本時間でも、サーバーと同じ日付の区切りになるようにするため。
+   サーバーから受け取るまでは、前回覚えた値 → 端末のタイムゾーンの順に使う。 */
+let APP_TZ_FMT = null, APP_TZ_NAME = '';
+function appTz() {
+  let tz = '';
+  try { tz = (S.tz && S.tz.script) || ''; } catch (e) {}          // S がまだ無い（起動の途中）ときもある
+  if (!tz) { try { tz = localStorage.getItem('gtdTz') || ''; } catch (e) {} }
+  return tz || (Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Tokyo');
+}
+function tzParts(date) {
+  const tz = appTz();
+  try {
+    if (!APP_TZ_FMT || APP_TZ_NAME !== tz) {
+      APP_TZ_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+      APP_TZ_NAME = tz;
+    }
+    const o = {}; APP_TZ_FMT.formatToParts(date).forEach(p => { o[p.type] = p.value; });
+    return { y: o.year, mo: o.month, d: o.day, h: o.hour === '24' ? '00' : o.hour, mi: o.minute, s: o.second };
+  } catch (e) {
+    const p = n => ('0' + n).slice(-2);
+    return { y: String(date.getFullYear()), mo: p(date.getMonth() + 1), d: p(date.getDate()), h: p(date.getHours()), mi: p(date.getMinutes()), s: p(date.getSeconds()) };
+  }
+}
+/** いまの時刻 'HH:MM'（アプリのタイムゾーン） */
+const nowHM = () => { const p = tzParts(new Date()); return p.h + ':' + p.mi; };
+/** 'yyyy-mm-dd HH:MM:SS'（アプリのタイムゾーンでの時刻）→ 実際の時刻（ミリ秒）。作業時間の計算用 */
+function stampMs(s) {
+  const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return NaN;
+  const guess = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  const p = tzParts(new Date(guess));
+  const shown = Date.UTC(+p.y, +p.mo - 1, +p.d, +p.h, +p.mi, +p.s);
+  return guess - (shown - guess);          // その国の時差を差し引く
+}
+const todayStr = () => { const p = tzParts(new Date()); return p.y + '-' + p.mo + '-' + p.d; };
 const dayDiff = (a, b) => Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00')) / 86400000);
 const addDays = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n);
   return d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2); };
@@ -1886,9 +1923,8 @@ const DOW_NAMES = ['日','月','火','水','木','金','土'];
 const RULES_WITH_DOW = ['週指定(間隔)'];
 const RULES_WITH_NUM = ['日指定(間隔)','週指定(間隔)','月指定(間隔)','年指定(間隔)'];
 const d2s = d => d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2);
-/** サーバー(Asia/Tokyo)と同じ書式のローカル時刻文字列 */
-const nowStamp = () => { const d = new Date();
-  return d2s(d) + ' ' + ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2) + ':' + ('0'+d.getSeconds()).slice(-2); };
+/** サーバーと同じ書式・同じタイムゾーンの時刻文字列 */
+const nowStamp = () => { const p = tzParts(new Date()); return p.y + '-' + p.mo + '-' + p.d + ' ' + p.h + ':' + p.mi + ':' + p.s; };
 const s2d = s => new Date(s + 'T00:00:00');
 const addD = (d, n) => { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate()+n); return x; };
 const eomonth = (d, n) => new Date(d.getFullYear(), d.getMonth()+n+1, 0);
@@ -2472,8 +2508,7 @@ function timeReached(t) {
   if (t.execDate && t.execDate !== today) return false;
   const hm = String(t.startTime || t.endTime || '').slice(0, 5);
   if (!hm) return false;
-  const d = new Date();
-  return hm <= ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  return hm <= nowHM();
 }
 /** 期限超過（目標期限・絶対期限のどちらかが昨日以前）。仮期限は含めない */
 function isOverdue(t) {
@@ -2644,6 +2679,7 @@ function applyBootstrap(boot, fromCache) {
   S.notices = boot.notices || S.notices || [];
   S.memoSummaries = boot.memoSummaries || S.memoSummaries || {};
   S.aiEnabled = boot.aiEnabled !== undefined ? boot.aiEnabled : S.aiEnabled;
+  if (boot.tz && boot.tz.script) { S.tz = boot.tz; try { localStorage.setItem('gtdTz', boot.tz.script); } catch (e) {} }
   S.projMap = {}; S.projects.forEach(p => S.projMap[p.id] = p);
   S.catMap = {}; S.categories.forEach(c => S.catMap[c.id] = c.name);
 
@@ -2908,6 +2944,8 @@ function buildSelects() {
     (APP_URL ? ' <button data-acct-open class="ml-1 rounded border border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-500 hover:bg-slate-50">切替</button>' : '') + '</span>' +
     '<span>📁 閲覧可能プロジェクト: ' + S.projects.length + '</span><span>🗂 タスク: ' + S.tasks.length + '</span>' +
     (S.aiEnabled ? '' : '<span class="text-amber-600">⚠ AIのAPIキーが未設定のためAI機能は使えません（設定 → AI）</span>') +
+    (S.tz && S.tz.sheet && S.tz.script && S.tz.sheet !== S.tz.script && S.user.isOwner
+      ? '<span class="font-semibold text-rose-600">⚠ タイムゾーンが食い違っています（アプリ ' + esc(S.tz.script) + '／シート ' + esc(S.tz.sheet) + '）。設定 → ℹ️ アプリ情報 でそろえてください</span>' : '') +
     (S.user.warning ? '<span class="basis-full rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 ring-1 ring-amber-200">⚠ ' + esc(S.user.warning) +
       (S.user.isOwner && S.user.mode === 'owner'
         ? ' <button data-open-keys class="ml-1 rounded bg-amber-600 px-2 py-0.5 font-medium text-white hover:bg-amber-700">共有の準備をする</button>'
@@ -4037,8 +4075,7 @@ function renderFocusRest() {
 
 /** 今日の時間指定タスクのうち、開始時刻を過ぎていて未完了のもの */
 function timedDueTasks() {
-  const now = new Date();
-  const hhmm = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
+  const hhmm = nowHM();
   return S.tasks.filter(t => t.status !== 'Done' && t.hasTime && t.execDate === todayStr() &&
     hasRealTime(t) && t.startTime <= hhmm)
     .sort((a, b) => a.startTime < b.startTime ? -1 : 1);
@@ -4060,9 +4097,9 @@ function updateTimers() {
   $$('.run-timer').forEach(el => {
     const s = el.dataset.start;
     if (!s) { el.textContent = '00:00'; return; }
-    const st = new Date(s.replace(' ', 'T'));
-    if (isNaN(st.getTime())) { el.textContent = '--:--'; return; }
-    const sec = Math.max(0, Math.floor((Date.now() - st.getTime()) / 1000));
+    const stMs = stampMs(s);
+    if (isNaN(stMs)) { el.textContent = '--:--'; return; }
+    const sec = Math.max(0, Math.floor((Date.now() - stMs) / 1000));
     const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), ss = sec % 60;
     el.textContent = (h ? h + ':' : '') + ('0' + m).slice(-2) + ':' + ('0' + ss).slice(-2);
   });
@@ -4130,9 +4167,9 @@ function focusAction(id, act) {
   t.status = act;
   if (act === 'InProgress') { t.logStart = nowStamp(); t.logEnd = ''; }
   if (act === 'Done' && t.logStart) {
-    const st = new Date(t.logStart.replace(' ', 'T'));
-    if (!isNaN(st.getTime())) {
-      const min = Math.round((Date.now() - st.getTime()) / 60000);
+    const stMs = stampMs(t.logStart);
+    if (!isNaN(stMs)) {
+      const min = Math.round((Date.now() - stMs) / 60000);
       if (min >= 0 && min < 60 * 24 * 30) t.actMin = min;   // 実測はサーバーでも再計算される
     }
   }
@@ -7546,6 +7583,30 @@ function androidLinkHtml() {
   '</div>';
 }
 
+/* 🌐 タイムゾーン（2026-11-03）：今どの国の時間で「今日」を数えているか、切り替え方 */
+function tzCardHtml() {
+  const tz = S.tz || {};
+  const dev = (function () { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { return ''; } })();
+  const bad = tz.sheet && tz.script && tz.sheet !== tz.script;
+  return '<div class="rounded-xl bg-white p-4 shadow-sm ring-1 ' + (bad ? 'ring-rose-300' : 'ring-slate-200') + '" id="tzCard">' +
+    '<p class="mb-1 text-sm font-bold text-slate-800">🌐 タイムゾーン（「今日」をどの国の時間で数えるか）</p>' +
+    '<table class="mb-2 text-xs text-slate-700"><tbody>' +
+      '<tr><td class="pr-3 text-slate-500">アプリ（Apps Script）</td><td><b>' + esc(tz.script || '（未取得）') + '</b></td></tr>' +
+      '<tr><td class="pr-3 text-slate-500">スプレッドシート</td><td>' + esc(tz.sheet || '（未取得）') + (bad ? ' <span class="font-semibold text-rose-600">⚠ アプリと違います</span>' : '') + '</td></tr>' +
+      '<tr><td class="pr-3 text-slate-500">この端末</td><td>' + esc(dev) + '</td></tr>' +
+      '<tr><td class="pr-3 text-slate-500">アプリの今</td><td>' + esc(todayStr() + ' ' + nowHM()) + '</td></tr>' +
+    '</tbody></table>' +
+    '<p class="text-xs leading-relaxed text-slate-600">画面の「今日」は、端末の国に関係なく<b>アプリのタイムゾーン</b>で数えます（サーバーと日付の区切りをそろえるため）。</p>' +
+    '<p class="mt-2 text-xs font-semibold text-slate-700">切り替え方（海外で使うときなど）</p>' +
+    '<ol class="list-decimal space-y-0.5 pl-5 text-xs leading-relaxed text-slate-600">' +
+      '<li>Apps Script のエディタ →［⚙ プロジェクトの設定］→「タイムゾーン」を変える（例：Asia/Baku）</li>' +
+      '<li>下のボタン（またはエディタで <code class="rounded bg-slate-100 px-1">syncTimeZone</code> を実行）で、スプレッドシートも同じにそろえる</li>' +
+      '<li>アプリを開き直す</li></ol>' +
+    '<p class="mt-1 text-[11px] text-slate-400">アプリとスプレッドシートが食い違うと、日付が1日ずれることがあります。定時処理（毎朝6時など）も新しいタイムゾーンの時刻で動きます。</p>' +
+    (S.user && S.user.isOwner ? '<button type="button" id="btnTzSync" class="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs">スプレッドシートをアプリのタイムゾーンにそろえる</button>' : '') +
+  '</div>';
+}
+
 function renderCfgAbout() {
   const url = KeyStore.url() || APP_URL || '';
   $('#cfgBody').innerHTML =
@@ -7569,6 +7630,7 @@ function renderCfgAbout() {
           '<p class="text-xs text-amber-700">URLをまだ把握していません。いちど /exec のURLで開き直してください。</p>') +
       '</div>' +
       androidLinkHtml() +
+      tzCardHtml() +
       '<div class="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">' +
         '<p class="mb-1 text-sm font-bold text-slate-800">同期のしくみ</p>' +
         '<ul class="list-disc space-y-0.5 pl-5 text-xs leading-relaxed text-slate-600">' +
@@ -10323,6 +10385,12 @@ function bindEvents() {
     const rg = e.target.closest('.resched-go');
     if (rg) { renderReschedOut(rg.dataset.date, !!rg.dataset.yn); return; }
     if (e.target.closest('.resched-ok')) { applyResched(); return; }
+    if (e.target.id === 'btnTzSync') {
+      busy(true, 'タイムゾーンをそろえています…');
+      try { const r = await api.syncTimeZone(); S.tz = r; renderCfgAbout(); toast(r.ok ? '✓ スプレッドシートも ' + r.script + ' になりました' : 'そろえられませんでした', r.ok ? '' : 'err'); }
+      catch (err) { toast('そろえられませんでした: ' + (err.message || err), 'err'); } finally { busy(false); }
+      return;
+    }
     const ys = e.target.closest('.yn-start');
     if (ys) { startYnPlan(ys.dataset.date || todayStr()); return; }
     const ya = e.target.closest('.yn-ans');
