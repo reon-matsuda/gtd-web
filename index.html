@@ -88,6 +88,7 @@
     .ftree .ft-row{ min-height:var(--ft-row); }
     .ftree .ft-go{ min-height:var(--ft-row) !important; }
     .ftree .ft-tog{ min-height:0 !important; height:18px; width:18px; border-radius:2px; }
+    .drop-hover{ outline:2px dashed #6366f1; outline-offset:1px; background:#eef2ff !important; }   /* ドラッグ中の落とし先 */
     @media (max-width: 639px){ .ftree{ --ft-row:34px; } }   /* スマホは指で押しやすい高さに */
     /* ⚠️ flexの子をスクロールさせるときは min-height:0 が要る。
        これが無いと中身の高さまで伸びて親（overflow:hidden）をはみ出し、
@@ -321,6 +322,10 @@
       <h1 class="text-base sm:text-lg font-bold tracking-tight text-slate-900 shrink-0">
         <span class="text-indigo-600">◆</span> Task / GTD
       </h1>
+      <span class="inline-flex shrink-0 gap-1">
+        <button id="navBack" type="button" class="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="1つ前の画面に戻る" aria-label="戻る" disabled>←</button>
+        <button id="navFwd" type="button" class="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="1つ先の画面に進む" aria-label="進む" disabled>→</button>
+      </span>
       <div class="order-last flex w-full min-w-0 items-center gap-2 sm:order-none sm:w-auto sm:flex-1">
         <div class="relative min-w-0 flex-1">
           <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -369,7 +374,6 @@
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="plan">📅 計画</button>
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="kanban">タスク</button>
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="gantt">ガントチャート</button>
-      <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="memo">プロジェクトメモ</button>
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="inbox">📥 Inbox整理<span id="inboxCount" class="ml-1 rounded-full bg-rose-500 px-1.5 text-[10px] text-white"></span></button>
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="projects">📁 フォルダ</button>
       <button class="tabbtn shrink-0 rounded-md px-3 py-1.5 font-medium text-slate-600" data-view="all">全タスク検索</button>
@@ -671,7 +675,7 @@
             <div class="clr-wrap"><input id="mHardDue" type="date" class="inp"><button type="button" class="clr" data-clear="mHardDue" title="空欄にする" aria-label="空欄にする">×</button></div></div>
           <div id="mAssigneeBox" data-ar="1"><label class="lbl">担当者 <button type="button" class="as-all ml-1 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600 hover:bg-slate-200">▾ 一覧</button> <button class="ml-1 rounded bg-slate-100 px-1.5 text-[10px] text-slate-600 hover:bg-slate-200 inline-add" data-kind="assignee">＋新規</button></label>
             <div class="clr-wrap"><input id="mAssignee" class="inp" autocomplete="off" placeholder="名前・メールで検索（スペースで絞り込み）"><button type="button" class="clr" data-clear="mAssignee" title="空欄にする" aria-label="空欄にする">×</button></div>
-            <div id="mAssigneeHits" class="mt-1 hidden max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-white"></div>
+            <div id="mAssigneeHits" class="mt-1 hidden max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white"></div>
             <datalist id="assigneeList"></datalist></div>
           <!-- リスケ可能か は廃止（絶対期限に置き換え）。データの互換のため値だけ保持する -->
           <div hidden><select id="mResched"><option value="">未設定</option><option value="Yes">Yes</option><option value="No">No</option></select></div>
@@ -836,6 +840,7 @@
         <button class="cfgtab shrink-0 rounded-md px-3 py-1.5 font-medium" data-cfg="plan">📅 計画</button>
         <button class="cfgtab shrink-0 rounded-md px-3 py-1.5 font-medium" data-cfg="share">📄 連絡・共有</button>
         <button class="cfgtab shrink-0 rounded-md px-3 py-1.5 font-medium" data-cfg="ai" data-owner-only="1">🤖 AI</button>
+        <button class="cfgtab shrink-0 rounded-md px-3 py-1.5 font-medium" data-cfg="dept" data-owner-only="1">🏢 部署連携</button>
         <button class="cfgtab shrink-0 rounded-md px-3 py-1.5 font-medium" data-cfg="about">ℹ️ アプリ情報</button>
       </div>
     </div>
@@ -1275,6 +1280,17 @@ function saveCache() {
  * 無操作1分／手動同期／件数超過で自動フラッシュ。
  * =======================================================================*/
 const QUEUE_KEY = 'gtdQueue_v1';
+/* サーバーから最後に受け取ったタスクの値（変えた項目だけを送るための比較元）2026-11-07 */
+const SYNC_FIELDS = ['name', 'memo', 'attach', 'status', 'gtd', 'categories', 'assignee', 'project', 'execDate', 'hasTime', 'startTime', 'endTime',
+  'due', 'asap', 'repeatRule', 'repeatNum', 'repeatDow', 'parent', 'importance', 'reschedulable', 'location', 'estMin', 'keepOverdue',
+  'hardDue', 'relatedProjects', 'place', 'snoozeUntil', 'aiFlag', 'linked'];
+const SRV = {
+  m: {},
+  put(t) { if (t && t.id && String(t.id).indexOf('tmp_') !== 0) { const o = {}; SYNC_FIELDS.forEach(k => { o[k] = t[k]; }); this.m[t.id] = JSON.stringify(o); } },
+  all(list) { this.m = {}; (list || []).forEach(t => this.put(t)); },
+  get(id) { return this.m[id] || null; }
+};
+
 const Q = {
   ids: [],            // [{id, type:'save'|'delete'}] ※同じidは1件に集約される
   errors: [],         // [{id, name, type, error, at, permanent}] 同期に失敗した内容
@@ -1311,8 +1327,9 @@ const Q = {
   /** 操作を登録（同じタスクは最新状態だけ送るので重複は持たない） */
   push(id, type) {
     const i = Q.ids.findIndex(x => x.id === id);
-    if (i >= 0) Q.ids[i].type = (type === 'delete') ? 'delete' : Q.ids[i].type;
-    else Q.ids.push({ id: id, type: type || 'save' });
+    if (i >= 0) { Q.ids[i].type = (type === 'delete') ? 'delete' : Q.ids[i].type; Q.ids[i].v = (Q.ids[i].v || 1) + 1; }
+    // base：変える前のサーバーの値。送るときに今の値と比べ、変えた項目だけを送る（2026-11-07）
+    else Q.ids.push({ id: id, type: type || 'save', v: 1, base: SRV.get(id) || null });
     Q.persist();
     renderSyncState();
     Q.resetIdle();
@@ -1359,16 +1376,34 @@ const Q = {
     return fixed;
   },
 
-  /** キューを applyBatch / doPost 用の ops 配列に変換する */
+  /**
+   * キューを applyBatch / doPost 用の ops 配列に変換する
+   * -------------------------------------------------------------------------
+   * 2026-11-07：既存のタスクは【変えた項目だけ】を送る。
+   * 以前はタスクの全項目を送っていたため、古い内容を持ったままの端末（閉じる直前に送った分を
+   * 次に開いたとき送り直す・しばらく開いていなかったスマホなど）が、ほかの端末で直した
+   * 名前や絶対期限を、古い値で丸ごと上書きしていた（＝「変えたのに元に戻る」）。
+   * 変える前のサーバーの値（base）と今の値を比べ、違う項目だけを送る。base が無いときは従来どおり全部。
+   */
   buildOps(batch) {
     return batch.map((x, i) => {
       if (x.type === 'delete') return { opId: i, type: 'delete', id: x.id };
       const t = S.tasks.find(y => y.id === x.id);
       if (!t) return null;
-      const task = Object.assign({}, t);
+      let task = Object.assign({}, t);
       if (String(task.id).indexOf('tmp_') === 0) {
         task.clientId = task.clientId || task.id;   // 冪等キー（再送しても1行しか作らない）
         task.id = '';                               // 新規作成
+      } else if (x.base) {
+        let base = null;
+        try { base = JSON.parse(x.base); } catch (e) { base = null; }
+        if (base) {
+          const part = { id: task.id };
+          let n = 0;
+          SYNC_FIELDS.forEach(k => { if (JSON.stringify(t[k] === undefined ? '' : t[k]) !== JSON.stringify(base[k] === undefined ? '' : base[k])) { part[k] = t[k]; n++; } });
+          if (!n) return null;                      // 何も変わっていない → 送らない
+          task = part;
+        }
       }
       return { opId: i, type: 'save', task: task, tempId: x.id };
     }).filter(Boolean);
@@ -1407,7 +1442,7 @@ const Q = {
     }
     Q.flushing = true;
     renderSyncState();
-    const batch = Q.ids.slice();                      // 送信対象を切り出す（この間の新規操作は次回へ）
+    const batch = Q.ids.map(x => Object.assign({}, x));                    // 送信対象を切り出す（この間の新規操作は次回へ）
     const ops = Q.buildOps(batch);
 
     try {
@@ -1426,6 +1461,18 @@ const Q = {
           Q.lastError = msg;
           // 「もう直りようがない」エラーは再送しても同じなので、キューから落とす
           if (rec.permanent) dropped.push(id); else failed.push({ id: id, type: op.type });
+          return;
+        }
+        if (r.task) SRV.put(r.task);
+        if (r.next) SRV.put(r.next);
+        // 送っている間に同じタスクをまた直していたら、その直しを消さない（手元はそのまま・次の回に送る）
+        const live = Q.ids.find(q => q.id === op.tempId || q.id === (r.task && r.task.id));
+        const sentV = (batch.find(b => b.id === op.tempId) || {}).v || 1;
+        if (r.task && live && (live.v || 1) > sentV) {
+          const lt = S.tasks.find(t => t.id === op.tempId);
+          if (lt && op.tempId !== r.task.id) { lt.id = r.task.id; lt.clientId = r.task.clientId || lt.clientId; }
+          live.id = r.task.id; live.base = SRV.get(r.task.id); live.keep = true;
+          if (r.next) S.tasks.unshift(r.next);
           return;
         }
         if (r.task) {
@@ -1450,9 +1497,12 @@ const Q = {
         if (r.next) S.tasks.unshift(r.next);
       });
 
-      // 送信済みをキューから除去（失敗分は残して次回リトライ）
+      // 送信済みをキューから除去（失敗分・送っている間にまた直したものは残して次回送る）
       const sentIds = batch.map(x => x.id);
-      Q.ids = Q.ids.filter(x => sentIds.indexOf(x.id) < 0 || failed.some(f => f.id === x.id));
+      Q.ids = Q.ids.filter(x => {
+        if (x.keep) { delete x.keep; return true; }
+        return sentIds.indexOf(x.id) < 0 || failed.some(f => f.id === x.id);
+      });
       // 成功した分のエラー記録は消す
       const stillBad = {};
       failed.concat(dropped.map(id => ({ id: id }))).forEach(f => { stillBad[f.id] = true; });
@@ -1567,6 +1617,7 @@ const Poller = {
   merge(fresh) {
     if (!Array.isArray(fresh)) return;
     Q.reconcile(fresh);        // ビーコンで既に届いていた仮タスクを実IDへ寄せる
+    SRV.all(fresh);
     const queued = {};
     Q.ids.forEach(q => { queued[q.id] = true; });
     const locals = S.tasks.filter(t => queued[t.id]);          // 未送信のものは自分の値を優先
@@ -1649,7 +1700,6 @@ function openMoreSheet() {
     item('🌱', '習慣', 'data-go="habits"', '毎日の習慣・連続日数・タイマー') +
     item('🧭', 'マイルール・考え方', 'data-go="rules"', '') +
     item('📁', 'フォルダ', 'data-go="projects"', 'フォルダの中にフォルダ・進捗・目標') +
-    item('📝', 'プロジェクトメモ', 'data-go="memo"', 'Areas / Resources とメモ') +
     item('🔍', '全タスク検索', 'data-go="all"', '条件を組み合わせて探す') +
     '<div class="my-1 border-t border-slate-100"></div>' +
     item('⚙️', '設定', 'data-act="cfg"', '配点・Slice・並び順・場所・計画・AI') +
@@ -2665,6 +2715,7 @@ async function init() {
 /** bootstrap（またはキャッシュ）を画面へ反映 */
 function applyBootstrap(boot, fromCache) {
   S.tasks = boot.tasks || [];
+  SRV.all(S.tasks);
   S.projects = boot.projects || [];
   S.categories = boot.categories || [];
   S.assignees = boot.assignees || [];
@@ -3533,7 +3584,7 @@ function folderTreeHtml(selId, terms) {
     const isOpen = !!(show || open[p.id]);
     const n = openCount(p.id);
     return '<li>' +
-      '<div class="ft-row flex items-center gap-1 rounded py-0.5 pr-1 ' + (p.id === selId ? 'bg-indigo-100 text-indigo-900' : 'hover:bg-slate-100') + '">' +
+      '<div class="ft-row fold-drop flex items-center gap-1 rounded py-0.5 pr-1 ' + (p.id === selId ? 'bg-indigo-100 text-indigo-900' : 'hover:bg-slate-100') + (S.clip && S.clip.kind === 'folder' && S.clip.id === p.id ? ' opacity-50' : '') + '" draggable="true" data-drag="folder:' + esc(p.id) + '" data-drop="' + esc(p.id) + '">' +
         (kids.length
           ? '<button type="button" class="ft-tog flex h-4 w-4 shrink-0 items-center justify-center border border-slate-400 bg-white text-[11px] leading-none text-slate-600" data-fid="' + esc(p.id) + '" aria-label="' + (isOpen ? '閉じる' : '開く') + '">' + (isOpen ? '−' : '＋') + '</button>'
           : '<span class="inline-block h-4 w-4 shrink-0"></span>') +
@@ -3548,11 +3599,39 @@ function folderTreeHtml(selId, terms) {
   const roots = folderChildren('').sort((a, b) => String(a.name).localeCompare(String(b.name), 'ja'));
   const noneN = S.tasks.filter(t => !t.project && t.status !== 'Done').length;
   return '<ul class="ftree">' +
-    '<li><div class="ft-row flex items-center gap-1 rounded py-0.5 pr-1 ' + (!selId ? 'bg-indigo-100 text-indigo-900' : 'hover:bg-slate-100') + '">' +
+    '<li><div class="ft-row fold-drop flex items-center gap-1 rounded py-0.5 pr-1 ' + (!selId ? 'bg-indigo-100 text-indigo-900' : 'hover:bg-slate-100') + '" data-drop="">' +
       '<span class="inline-block h-4 w-4 shrink-0"></span><button type="button" class="ft-go flex flex-1 items-center gap-1 text-left text-[13px] font-semibold" data-fid="">🗂 すべて' +
       (noneN ? '<span class="ml-auto rounded-full bg-slate-100 px-1.5 text-[10px] font-normal text-slate-500" title="フォルダなしの未完了">' + noneN + '</span>' : '') + '</button></div>' +
       '<ul>' + (roots.map(p => node(p, 0, {})).join('') || '<li class="py-2 text-[11px] text-slate-400">' + (terms.length ? '見つかりません' : 'フォルダがありません') + '</li>') + '</ul></li>' +
   '</ul>';
+}
+
+/* -------------------------------------------------------------------------
+ * フォルダ・タスクの移動（2026-11-07）：エクスプローラーのように
+ *   ・ドラッグ＆ドロップ（PC）：フォルダ／タスクを、ツリーの行・フォルダのカード・パンくずに落とす
+ *   ・✂ 切り取り → 移したい先を開いて「📋 ここに貼り付け」（スマホでも使える）
+ * フォルダを自分の中（子・孫）へは入れられない（輪になるため）。サーバーでも同じ確認をする。
+ */
+async function moveToFolder(kind, id, target) {
+  const to = target || '';
+  if (kind === 'folder') {
+    const p = S.projMap[id];
+    if (!p) return false;
+    if (to === id || folderSubtree(id)[to]) { toast('フォルダを自分の中には入れられません', 'warn'); return false; }
+    if (folderParent(p) === to) { toast('もうそのフォルダに入っています'); return false; }
+    const before = p.parent || '';
+    p.parent = to; renderProjects();
+    try { await api.saveProject({ id: id, parent: to }); toast('📁「' + p.name + '」を「' + (to ? S.projMap[to].name : 'いちばん上') + '」へ移しました'); saveCache(); return true; }
+    catch (e) { p.parent = before; renderProjects(); toast('移せませんでした: ' + (e.message || e), 'err'); return false; }
+  }
+  const t = S.tasks.find(x => x.id === id);
+  if (!t) return false;
+  if ((t.project || '') === to) { toast('もうそのフォルダに入っています'); return false; }
+  t.project = to;
+  localSave(t);                                         // 送るのは「フォルダ」の項目だけ（変えた項目だけ送る）
+  renderProjects();
+  toast('📄「' + t.name + '」を「' + (to ? S.projMap[to].name : 'フォルダなし') + '」へ移しました');
+  return true;
 }
 
 function renderProjects() {
@@ -3583,14 +3662,20 @@ function renderProjects() {
   let cur = S.projMap[here], guard = 0;
   while (cur && guard++ < 50) { crumbs.unshift(cur); cur = S.projMap[folderParent(cur)]; }
   const crumbHtml = '<nav class="fold-crumbs flex flex-wrap items-center gap-1 text-sm" aria-label="フォルダの場所">' +
-    '<button class="fold-go rounded px-1.5 py-0.5 ' + (here ? 'text-indigo-600 hover:bg-indigo-50' : 'font-bold text-slate-800') + '" data-fid="">🗂 すべて</button>' +
-    crumbs.map((p, i) => '<span class="text-slate-300">›</span><button class="fold-go rounded px-1.5 py-0.5 ' +
-      (i === crumbs.length - 1 ? 'font-bold text-slate-800' : 'text-indigo-600 hover:bg-indigo-50') + '" data-fid="' + esc(p.id) + '">' + esc(p.name || '（名称未設定）') + '</button>').join('') +
+    '<button class="fold-go fold-drop rounded px-1.5 py-0.5 ' + (here ? 'text-indigo-600 hover:bg-indigo-50' : 'font-bold text-slate-800') + '" data-fid="" data-drop="">🗂 すべて</button>' +
+    crumbs.map((p, i) => '<span class="text-slate-300">›</span><button class="fold-go fold-drop rounded px-1.5 py-0.5 ' +
+      (i === crumbs.length - 1 ? 'font-bold text-slate-800' : 'text-indigo-600 hover:bg-indigo-50') + '" data-fid="' + esc(p.id) + '" data-drop="' + esc(p.id) + '">' + esc(p.name || '（名称未設定）') + '</button>').join('') +
     '</nav>';
 
   const hereP = S.projMap[here];
+  const clip = S.clip && (S.clip.kind === 'folder' ? S.projMap[S.clip.id] : S.tasks.find(t => t.id === S.clip.id)) ? S.clip : null;
+  if (!clip) S.clip = null;
+  const clipHtml = clip ? '<div class="flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs ring-1 ring-amber-200">' +
+      '<span>✂ ' + (clip.kind === 'folder' ? '📁 フォルダ' : '📄 タスク') + '「<b>' + esc(clip.kind === 'folder' ? S.projMap[clip.id].name : (S.tasks.find(t => t.id === clip.id) || {}).name) + '</b>」を切り取り中 — 移したい先を開いて貼り付け</span>' +
+      '<button id="clipPaste" class="rounded-lg bg-amber-600 px-3 py-1 font-semibold text-white">📋 ここ（' + esc(here ? S.projMap[here].name : 'いちばん上') + '）に貼り付け</button>' +
+      '<button id="clipCancel" class="rounded px-2 py-1 text-slate-500 hover:bg-white">やめる</button></div>' : '';
   $('#projTools').innerHTML = activeSliceBar() +
-    '<div class="flex flex-col gap-2">' + crumbHtml +
+    '<div class="flex flex-col gap-2">' + clipHtml + crumbHtml +
     '<div class="flex flex-wrap items-center gap-2">' +
       (here ? '<button class="fold-go shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-50" data-fid="' + esc(folderParent(hereP)) + '">← 上へ</button>' : '') +
       '<button id="projNew" class="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">＋ フォルダ' + (here ? '（この中に）' : '') + '</button>' +
@@ -3606,7 +3691,7 @@ function renderProjects() {
     const bar = s.pct >= 100 ? '#10B981' : s.overdue ? '#f43f5e' : '#6366f1';
     const ms = projMilestones(p);
     const next = ms.length ? (ms.filter(m => m.due && m.due >= todayStr())[0] || ms[0]) : null;
-    return '<div class="proj-card fold-card cursor-pointer rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200 hover:shadow-md" data-pid="' + esc(p.id) + '">' +
+    return '<div class="proj-card fold-card fold-drop cursor-pointer rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200 hover:shadow-md' + (S.clip && S.clip.kind === 'folder' && S.clip.id === p.id ? ' opacity-50' : '') + '" data-pid="' + esc(p.id) + '" draggable="true" data-drag="folder:' + esc(p.id) + '" data-drop="' + esc(p.id) + '">' +
       '<div class="mb-1 flex flex-wrap items-center gap-1.5">' +
         '<span class="text-base" aria-hidden="true">' + (p.kids ? '📂' : '📁') + '</span>' +
         '<span class="min-w-0 flex-1 truncate text-sm font-bold text-slate-800">' + esc(p.name || '(名称未設定)') + '</span>' +
@@ -3628,7 +3713,8 @@ function renderProjects() {
       '<div class="mt-2 flex flex-wrap gap-1.5">' +
         '<button class="proj-open rounded border border-slate-300 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50" data-pid="' + esc(p.id) + '">タスク一覧へ</button>' +
         '<button class="proj-memo rounded border border-slate-300 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50" data-pid="' + esc(p.id) + '">メモ</button>' +
-        '<button class="proj-edit rounded border border-slate-300 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50" data-pid="' + esc(p.id) + '">✎ 編集・移動</button>' +
+        '<button class="proj-edit rounded border border-slate-300 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50" data-pid="' + esc(p.id) + '">✎ 編集</button>' +
+        '<button class="clip-cut rounded border border-slate-300 px-2 py-1 text-[10px] text-slate-600 hover:bg-slate-50" data-kind="folder" data-id="' + esc(p.id) + '" title="切り取って、別のフォルダに貼り付ける">✂ 切り取り</button>' +
         '<button class="proj-del ml-auto rounded border border-rose-200 px-2 py-1 text-[10px] text-rose-600 hover:bg-rose-50" data-pid="' + esc(p.id) + '">🗑</button>' +
       '</div></div>';
   };
@@ -3642,9 +3728,11 @@ function renderProjects() {
     const shown = own.slice(0, 200);
     taskHtml = '<h3 class="mb-1 mt-4 text-xs font-bold text-slate-500">📄 ' + (here ? 'このフォルダ' : 'フォルダに入っていない') + 'のタスク・メモ（' + own.length + '件' + (doneN ? '／Done ' + doneN + '件' : '') + '）</h3>' +
       (shown.length ? '<div class="space-y-1">' + shown.map(t =>
-        '<div class="flex items-center gap-1.5 rounded-lg bg-white px-2 py-1.5 ring-1 ring-slate-100">' +
+        '<div class="flex items-center gap-1.5 rounded-lg bg-white px-2 py-1.5 ring-1 ring-slate-100' + (S.clip && S.clip.kind === 'task' && S.clip.id === t.id ? ' opacity-50' : '') + '" draggable="true" data-drag="task:' + esc(t.id) + '">' +
+          '<span class="cursor-grab select-none text-[11px] text-slate-300" aria-hidden="true">⠿</span>' +
           '<span class="min-w-0 flex-1 cursor-pointer truncate text-xs open-task" data-id="' + esc(t.id) + '">' +
             (isAreaLike(t.gtd) ? '🗒 ' : '') + (t.importance === '高' ? '🚩 ' : '') + (t.repeatRule ? '🔁 ' : '') + esc(t.name) + '</span>' +
+          '<button class="clip-cut shrink-0 rounded px-1 text-[11px] text-slate-400 hover:bg-slate-100" data-kind="task" data-id="' + esc(t.id) + '" title="切り取り">✂</button>' +
           (t.hardDue ? '<span class="shrink-0 rounded bg-rose-50 px-1 text-[10px] font-semibold text-rose-700" title="絶対期限">⛔' + t.hardDue.slice(5) + '</span>' : '') +
           (t.due ? '<span class="shrink-0 text-[10px] text-slate-400" title="目標期限">' + t.due.slice(5) + '</span>' : '') +
         '</div>').join('') + (own.length > shown.length ? '<p class="py-1 text-[11px] text-slate-400">ほか ' + (own.length - shown.length) + '件（タスク一覧で見られます）</p>' : '') + '</div>'
@@ -4308,10 +4396,54 @@ async function syncDown() {
  * 集中（既定25分）→ 小休憩（5分）を繰り返し、4回ごとに長休憩（15分）。
  * 状態は端末に保存するので、画面を閉じても戻ってくれば続きから表示される。
  */
+/* 🍅 ポモドーロの記録（2026-11-07）：日ごとの回数と集中した分を userState.pomoLog に残す（端末をまたいで共有・90日分）
+   { 'yyyy-mm-dd': { n: 作業をやりきった回数, min: 集中した分（途中で止めた分も含む） } } */
+const PomoLog = {
+  get() { return (S.userState && S.userState.pomoLog) || {}; },
+  add(min, full) {
+    const d = todayStr();
+    S.userState = S.userState || {};
+    const log = Object.assign({}, this.get());
+    const cur = Object.assign({ n: 0, min: 0 }, log[d] || {});
+    cur.min += Math.round(min); if (full) cur.n += 1;
+    log[d] = cur;
+    const keep = addDays(d, -90);
+    Object.keys(log).forEach(k => { if (k < keep) delete log[k]; });
+    S.userState.pomoLog = log;
+    try { saveCache(); } catch (e) {}
+    clearTimeout(this.t);
+    this.t = setTimeout(() => api.saveUserState({ pomoLog: S.userState.pomoLog }).catch(() => {}), 1500);
+    if (S.view === 'home') renderHome();
+  },
+  day(d) { return Object.assign({ n: 0, min: 0 }, this.get()[d] || {}); },
+  /** ホームに出す「今日はこんなに集中しました」 */
+  html() {
+    const today = todayStr();
+    const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
+    const vals = days.map(d => this.day(d));
+    const week = vals.reduce((a, v) => a + v.min, 0);
+    if (!week) return '';
+    const t = this.day(today), max = Math.max(25, ...vals.map(v => v.min));
+    return '<div class="mb-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">' +
+      '<div class="flex flex-wrap items-baseline gap-x-3"><p class="text-sm font-bold text-slate-800">🍅 今日は ' + minLabel(t.min || 0) + ' 集中しました' + (t.n ? '（' + t.n + 'セット）' : '') + '</p>' +
+      '<p class="text-[11px] text-slate-500">この7日で ' + minLabel(week) + '</p></div>' +
+      '<div class="mt-2 flex h-16 items-end gap-1.5" role="img" aria-label="直近7日の集中した時間">' + vals.map((v, i) =>
+        '<div class="flex flex-1 flex-col items-center gap-0.5"><div class="w-full rounded-t ' + (i === 6 ? 'bg-rose-500' : 'bg-rose-200') + '" style="height:' + Math.round(v.min / max * 44) + 'px" title="' + days[i] + '：' + v.min + '分"></div>' +
+        '<span class="text-[10px] tabular-nums text-slate-400">' + DOW_FULL[new Date(days[i] + 'T00:00:00').getDay()] + '</span></div>').join('') + '</div></div>';
+  }
+};
+
 const Pomo = {
   KEY: 'gtdPomo_v1',
   st: null, timer: null,
-  cfg() { return Object.assign({ work: 25, short: 5, long: 15 }, (S.settings && S.settings.pomodoro) || {}); },
+  /* 設定（2026-11-07）：work=作業 / short=小休憩 / long=大休憩（分）、longEvery=何セットごとに大休憩、
+     sets=全部で何セットやったら終わるか（0=止めるまで続ける）。1セット＝作業＋休憩 */
+  cfg() {
+    const c = Object.assign({ work: 25, short: 5, long: 15, longEvery: 4, sets: 0 }, (S.settings && S.settings.pomodoro) || {});
+    ['work', 'short', 'long'].forEach(k => { c[k] = Math.max(1, Number(c[k]) || 1); });
+    c.longEvery = Math.max(1, Number(c.longEvery) || 4); c.sets = Math.max(0, Number(c.sets) || 0);
+    return c;
+  },
   load() { try { this.st = JSON.parse(localStorage.getItem(this.KEY) || 'null'); } catch (e) { this.st = null; } this.tick(); },
   save() { try { if (this.st) localStorage.setItem(this.KEY, JSON.stringify(this.st)); else localStorage.removeItem(this.KEY); } catch (e) {} },
   start(habit) {
@@ -4327,7 +4459,16 @@ const Pomo = {
     this.save(); this.tick();
     toast('🍅 ' + c.work + '分 集中します');
   },
-  stop() { this.st = null; this.save(); this.render(); clearInterval(this.timer); this.timer = null; },
+  stop() {
+    // 作業の途中で止めたときも、1分以上やっていればその分を記録する（習慣のタイマーは習慣の記録へ）
+    const s = this.st;
+    if (s && s.phase === 'work' && !s.habitId) {
+      const total = this.cfg().work * 60000, left = s.paused || Math.max(0, s.endsAt - Date.now());
+      const done = Math.floor((total - left) / 60000);
+      if (done >= 1) PomoLog.add(done, false);
+    }
+    this.st = null; this.save(); this.render(); clearInterval(this.timer); this.timer = null;
+  },
   pause() {
     if (!this.st) return;
     if (this.st.paused) { this.st.endsAt = Date.now() + this.st.paused; this.st.paused = 0; }
@@ -4344,7 +4485,15 @@ const Pomo = {
       return;
     }
     if (s.phase === 'work') {
-      const long = s.round % 4 === 0;
+      PomoLog.add(c.work, true);                     // 作業1回分を記録
+      if (c.sets && s.round >= c.sets) {             // 決めたセット数をやりきったら終わり
+        const n = s.round;
+        this.st = null; this.save(); this.render(); clearInterval(this.timer); this.timer = null;
+        try { beep(); } catch (e) {}
+        toast('🎉 ' + n + 'セット完了！おつかれさまでした');
+        return;
+      }
+      const long = s.round % c.longEvery === 0;
       s.phase = long ? 'long' : 'short';
       s.endsAt = Date.now() + (long ? c.long : c.short) * 60000;
     } else { s.phase = 'work'; s.round++; s.endsAt = Date.now() + c.work * 60000; }
@@ -4372,7 +4521,7 @@ const Pomo = {
     const mm = String(Math.floor(left / 60)).padStart(2, '0'), ss = String(left % 60).padStart(2, '0');
     const work = s.phase === 'work';
     el.innerHTML = '<div class="rounded-2xl px-3 py-2 text-white shadow-lg" style="background:' + (work ? '#E03E3E' : '#0F9D58') + '">' +
-      '<div class="flex items-baseline gap-2"><span class="max-w-[9rem] truncate text-[11px] opacity-90">' + (s.label ? '🌱 ' + esc(s.label) : work ? '作業 ' + s.round + '回目' : '休憩') + (s.paused ? '（停止中）' : '') + '</span>' +
+      '<div class="flex items-baseline gap-2"><span class="max-w-[9rem] truncate text-[11px] opacity-90">' + (s.label ? '🌱 ' + esc(s.label) : work ? '作業 ' + s.round + (this.cfg().sets ? '/' + this.cfg().sets : '') + '回目' : (s.phase === 'long' ? '大休憩' : '休憩')) + (s.paused ? '（停止中）' : '') + '</span>' +
       '<span class="font-mono text-2xl font-bold tabular-nums">' + mm + ':' + ss + '</span></div>' +
       '<div class="mt-1 flex gap-1">' +
         '<button class="pomo-btn rounded bg-white/20 px-2 py-0.5 text-[11px]" data-p="pause">' + (s.paused ? '再開' : '停止') + '</button>' +
@@ -4440,6 +4589,7 @@ function homeProjects() {
 }
 function renderHome() {
   const today = todayStr();
+  if (S.user && S.user.isOwner && !S.dept && !S.deptBusy) setTimeout(() => loadDept(false), 0);
   const load = dayLoad(today);
   const pct = load.capacity ? Math.min(100, Math.round(load.min / load.capacity * 100)) : 100;
   const open = S.tasks.filter(t => t.status !== 'Done' && !isAreaLike(t.gtd));
@@ -4467,9 +4617,11 @@ function renderHome() {
     '<p class="text-[11px] text-slate-500">' + label + '</p><p class="text-2xl font-bold ' + tone + '">' + val + '</p></button>';
   $('#homeBody').innerHTML =
     homeHabitsHtml() +
+    homeDeptHtml() +
     '<div class="mb-3 flex flex-wrap justify-end gap-2"><button class="yn-start rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white">🙋 今日の計画を立てる</button>' +
       '<button class="pomo-start rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50">🍅 ポモドーロ開始</button></div>' +
-    waitingAskHtml() +
+    PomoLog.html() +
+    // 連絡待ち1週間の確認は、ホームには出さずフォーカスだけに出す（2026-11-07）
     '<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">' +
       stat('今日の作業量 / 上限', minLabel(load.min) + '<span class="text-sm font-normal text-slate-400"> / ' + minLabel(load.capacity) + '</span>', pct >= 100 ? 'text-rose-600' : 'text-slate-900', 'plan') +
       stat('⛔ 絶対期限が7日以内', hard7.length, hard7.length ? 'text-rose-600' : 'text-slate-900', 'focus') +
@@ -4485,6 +4637,78 @@ function renderHome() {
 }
 
 /* =========================================================================
+ * 🏢 部署アプリ連携（財務部＝家計簿）2026-11
+ * ホームに「財務部」カードを出す。取得は管理者のみ（サーバー側でも管理者以外には空を返す）。
+ * =======================================================================*/
+function deptAgo(iso) {
+  if (!iso) return '';
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  return m < 1 ? 'たった今' : m < 60 ? m + '分前' : m < 1440 ? Math.round(m / 60) + '時間前' : Math.round(m / 1440) + '日前';
+}
+function deptYen(n) { return (Number(n) || 0).toLocaleString('ja-JP') + '円'; }
+function homeDeptHtml() {
+  if (!S.user || !S.user.isOwner) return '';
+  const D = S.dept;
+  if (!D) return '';                                   // 取得前は何も出さない（ちらつき防止）
+  const apps = Object.keys(D.apps || {});
+  if (!apps.length) {
+    return '<div class="mb-3 rounded-xl border border-dashed border-slate-300 bg-white p-3 text-xs text-slate-500">' +
+      '💰 財務部（家計簿）はまだつながっていません。<button class="dept-setup ml-1 underline">設定 › 部署連携</button> で接続できます。</div>';
+  }
+  return apps.map(app => {
+    const a = D.apps[app], d = a.data;
+    const head = '<div class="flex flex-wrap items-center gap-2"><p class="text-sm font-bold text-slate-800">💰 ' + esc(a.label || '財務部') + '</p>' +
+      '<span class="text-[11px] text-slate-400">' + (d && d.asOf ? esc(String(d.asOf).slice(0, 16).replace('T', ' ')) + ' 時点' : '') + (a.fetchedAt ? '（取得 ' + deptAgo(a.fetchedAt) + '）' : '') + '</span>' +
+      '<button class="dept-refresh ml-auto rounded border border-slate-300 bg-white px-2 py-0.5 text-[11px] hover:bg-slate-50">↻ 更新</button></div>';
+    const err = a.ok ? '' : '<p class="mt-2 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-800 ring-1 ring-amber-200">⚠ 最新の取得に失敗しました：' + esc(a.error || '') +
+      (d ? '（下は前回取れた内容です）' : '') + '</p>';
+    if (!d) return '<div class="mb-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">' + head + err + '</div>';
+    const s = d.summary || {};
+    const cell = (label, val, tone) => '<div class="rounded-lg bg-slate-50 p-2"><p class="text-[10px] text-slate-500">' + label + '</p><p class="text-base font-bold ' + (tone || 'text-slate-900') + '">' + val + '</p></div>';
+    const tone = lv => lv === 'danger' || lv === 'error' ? 'bg-rose-50 text-rose-800 ring-rose-200' : lv === 'warn' || lv === 'warning' ? 'bg-amber-50 text-amber-800 ring-amber-200' : 'bg-slate-50 text-slate-700 ring-slate-200';
+    const alerts = (d.alerts || []).slice(0, 8).map(x => '<p class="mt-1 rounded px-2 py-1 text-xs ring-1 ' + tone(x.level) + '">' + esc(x.text || '') + '</p>').join('');
+    const wk = (d.warikan || []).slice(0, 5).map(w => '<p class="mt-1 text-xs text-slate-600">🤝 ' + esc(typeof w === 'string' ? w : (w.text || w.name || JSON.stringify(w))) + '</p>').join('');
+    return '<div class="mb-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200">' + head + err +
+      '<div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">' +
+        cell('1日あたり使える額', deptYen(s.freeLeftPerDay), Number(s.freeLeftPerDay) < 0 ? 'text-rose-600' : '') +
+        cell('今月の自由費の残り', deptYen(s.freeLeftMonth), Number(s.freeLeftMonth) < 0 ? 'text-rose-600' : '') +
+        cell('今月の残り日数', (s.remainingDays != null ? s.remainingDays : '–') + '日') +
+        cell('投資予定の残り', deptYen(s.investEnd)) +
+      '</div>' + alerts + wk + '</div>';
+  }).join('');
+}
+async function loadDept(force) {
+  if (!S.user || !S.user.isOwner) return;
+  if (S.deptBusy) return;
+  S.deptBusy = true;
+  try {
+    S.dept = force ? await api.refreshDeptBriefings() : await api.getDeptBriefings();
+  } catch (e) { if (force) toast('財務部の更新に失敗: ' + (e.message || e), 'err'); }
+  finally { S.deptBusy = false; if (S.view === 'home') renderHome(); }
+}
+
+function renderCfgDept() {
+  if (!S.user.isOwner) { $('#cfgBody').innerHTML = cfgCard('', '<p class="py-6 text-center text-sm text-slate-500">この設定は管理者のみが変更できます。</p>'); return; }
+  $('#cfgBody').innerHTML = cfgCard('💰 財務部（家計簿アプリ）',
+    '<div id="deptState" class="mb-2 text-xs text-slate-500">読み込み中…</div>' +
+    '<label class="block text-[11px] text-slate-500">API の URL（家計簿の 設定 › 他アプリとの連携 に出る /exec のURL）</label>' +
+    '<input id="deptUrl" class="inp mb-2 w-full text-xs" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">' +
+    '<label class="block text-[11px] text-slate-500">サービスキー（家計簿で発行したもの。保存後は画面に出ません）</label>' +
+    '<input id="deptKey" type="password" class="inp mb-2 w-full text-xs" placeholder="新しく貼るときだけ入力" autocomplete="off">' +
+    '<div class="flex flex-wrap gap-2"><button id="deptSave" class="rounded border border-slate-300 bg-white px-3 py-1 text-xs">保存して接続テスト</button>' +
+    '<button id="deptClear" class="rounded border border-rose-300 bg-white px-3 py-1 text-xs text-rose-700">接続を外す</button></div>',
+    '家計簿の「サービスキー」は、残りの自由費・アラートなど「ブリーフィング」を読むだけの権限で、家計簿のデータは変更できません。' +
+    '毎朝の自動処理と、ホームの「↻ 更新」で取得します。');
+  $('#cfgHint').textContent = '';
+  api.getDeptStatus().then(st => {
+    const k = st.kakeibo || {}, el = $('#deptState');
+    if (!el) return;
+    el.innerHTML = k.linked ? '✓ 接続済み（キー末尾 …' + esc(k.keyTail) + '）' : '未接続';
+    if (k.linked && $('#deptUrl')) $('#deptUrl').value = k.url;
+  }).catch(e => { const el = $('#deptState'); if (el) el.textContent = '状態を取得できません: ' + (e.message || e); });
+}
+
+/* =========================================================================
  * 🗒 メモ：Areas / Resources を「読む」ための画面（タスクとは分けて扱う）
  * =======================================================================*/
 function renderNotes() {
@@ -4493,7 +4717,9 @@ function renderNotes() {
   const arch = mode === 'archive';
   // 📦 アーカイブは別シート。開いたときに1回だけ取りに行く
   if (arch && !S.memoArchive) { loadMemoArchive(); }
-  const allMemos = arch ? (S.memoArchive || []) : S.tasks.filter(t => isAreaLike(t.gtd));
+  // 2026-11-07「プロジェクトメモ」を統合：Areas / Resources に加えて、メモ本文のあるタスクも出せる
+  const withTasks = !!S.notesWithTasks;
+  const allMemos = arch ? (S.memoArchive || []) : S.tasks.filter(t => isAreaLike(t.gtd) || (withTasks && (t.memo || '').trim()));
   const inFolder = S.notesProj && S.notesProj !== '__none' ? folderSubtree(S.notesProj) : null;   // フォルダは中のフォルダも含む
   let list = allMemos
     .filter(t => arch || mode === 'all' ? true : mode === 'day' ? isDayMemo(t) && t.status !== 'Done' : t.status !== 'Done')
@@ -4510,13 +4736,15 @@ function renderNotes() {
   const groups = {};
   list.forEach(t => { (groups[t.project || ''] = groups[t.project || ''] || []).push(t); });
   // Done のメモ（繰り返しなし）はまとめてアーカイブへ送れる
-  const doneMemos = arch ? [] : list.filter(t => t.status === 'Done' && !t.repeatRule);
+  const doneMemos = arch ? [] : list.filter(t => t.status === 'Done' && !t.repeatRule && isAreaLike(t.gtd));
   $('#notesTools').innerHTML = '<div class="flex flex-wrap items-center gap-2">' +
     '<input id="notesQ" type="search" class="w-56 max-w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" placeholder="メモを検索（スペースで絞り込み）" value="' + esc(S.notesQ || '') + '">' +
     '<select id="notesProj" class="max-w-[14rem] rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"><option value="">📁 すべてのフォルダ</option>' +
       projOpts.map(o => '<option value="' + esc(o.id || '__none') + '"' + (S.notesProj && (o.id || '__none') === S.notesProj ? ' selected' : '') + '>' + esc(o.name) + '（' + o.n + '）</option>').join('') + '</select>' +
     [['live', '活きているメモ'], ['day', 'その日だけのメモ'], ['all', 'Done も含む'], ['archive', '📦 アーカイブ']].map(o =>
       '<button class="notes-mode rounded-lg border px-2.5 py-1.5 text-xs ' + (mode === o[0] ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white') + '" data-m="' + o[0] + '">' + o[1] + '</button>').join('') +
+    (arch ? '' : '<label class="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"><input id="notesWithTasks" type="checkbox"' + (withTasks ? ' checked' : '') + '> メモのあるタスクも</label>') +
+    (S.notesProj && S.projMap[S.notesProj] && S.projMap[S.notesProj].docUrl ? '<a href="' + esc(S.projMap[S.notesProj].docUrl) + '" target="_blank" rel="noopener" class="text-xs text-indigo-600 underline">NotebookLM資料 ↗</a>' : '') +
     (doneMemos.length ? '<button id="memoArchDone" class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs">📦 Done のメモをアーカイブへ（' + doneMemos.length + '件）</button>' : '') +
     (arch ? '<button id="memoArchReload" class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs">↻ 読み直す</button>' : '') +
     '<span class="text-[11px] text-slate-400">' + (arch && !S.memoArchive ? '読み込み中…' : list.length + '件') + '</span></div>';
@@ -4533,7 +4761,7 @@ function renderNotes() {
     }
     return '<div class="rounded-xl bg-white p-3 shadow-sm ring-1 ring-slate-200 hover:ring-slate-400 ' + (t.status === 'Done' ? 'opacity-60' : '') + '">' +
       '<div class="cursor-pointer open-task" data-id="' + esc(t.id) + '">' + memoHtml + '</div>' +
-      (t.repeatRule ? '' : '<div class="mt-2 flex justify-end"><button class="memo-archive rounded px-2 py-0.5 text-[10px] text-slate-400 hover:bg-slate-100 hover:text-slate-700" data-mid="' + esc(t.id) + '" title="メモアーカイブ（別シート）へ移す。あとで戻せます">📦 しまう</button></div>') +
+      (t.repeatRule || !isAreaLike(t.gtd) ? (isAreaLike(t.gtd) ? '' : '<p class="mt-1 text-[10px] text-slate-400">タスク（' + esc(gtdShort(t.gtd) || '種別なし') + '）のメモ</p>') : '<div class="mt-2 flex justify-end"><button class="memo-archive rounded px-2 py-0.5 text-[10px] text-slate-400 hover:bg-slate-100 hover:text-slate-700" data-mid="' + esc(t.id) + '" title="メモアーカイブ（別シート）へ移す。あとで戻せます">📦 しまう</button></div>') +
     '</div>';
   };
   $('#notesBody').innerHTML = Object.keys(groups).map(pid => {
@@ -4569,6 +4797,7 @@ async function archiveMemosUi(ids) {
   } catch (e) { toast('移せませんでした: ' + (e.message || e), 'err'); }
   finally { busy(false); }
 }
+
 async function restoreMemosUi(ids) {
   busy(true, 'メモ一覧に戻しています…');
   try {
@@ -4776,11 +5005,39 @@ function renderHabits() {
     return '<div><h3 class="mb-1.5 mt-4 text-xs font-bold text-slate-500">' + HABIT_SLOT_ICON[sl] + ' ' + sl + '</h3><div class="space-y-1.5">' + list.map(row).join('') + '</div></div>';
   }).join('');
   const archived = S.habits.filter(h => !h.active);
-  $('#habitsBody').innerHTML = '<div class="mx-auto max-w-3xl">' + head +
+  $('#habitsBody').innerHTML = '<div class="mx-auto max-w-3xl">' + head + recurringTasksHtml() +
     (groups || '<div class="mt-4 rounded-2xl bg-white p-6 text-center ring-1 ring-slate-200"><p class="text-sm text-slate-600">まだ習慣がありません。小さく始めるのがコツです。</p>' +
       '<div class="mt-3 flex flex-wrap justify-center gap-1.5">' + HABIT_TEMPLATES.map((t, i) => '<button class="hb-tpl rounded-full border border-emerald-300 px-3 py-1 text-xs text-emerald-800 hover:bg-emerald-50" data-i="' + i + '">' + HABIT_SLOT_ICON[t.slot] + ' ' + esc(t.name) + '</button>').join('') + '</div></div>') +
     (archived.length ? '<details class="mt-6 text-xs text-slate-500"><summary class="cursor-pointer">しまった習慣（' + archived.length + '）</summary>' +
       archived.map(h => '<div class="mt-1 flex items-center gap-2"><span class="flex-1">' + esc(h.name) + '</span><button class="hb-revive rounded border border-slate-300 px-2 py-0.5" data-id="' + esc(h.id) + '">再開</button></div>').join('') + '</details>' : '') +
+  '</div>';
+}
+
+/**
+ * 🔁 繰り返しタスクも習慣タブに出す（2026-11-07）
+ * 繰り返しルールの付いた未完了タスクのうち、実行日（なければ目標期限）が今日以前・未入力のもの。
+ * ✓ はタスクの「完了」と同じ（サーバーが次の回を作る）。7日先までの分は畳んで出す。
+ */
+function recurringTasksHtml() {
+  const today = todayStr(), wk = addDays(today, 7);
+  const rec = S.tasks.filter(t => t.repeatRule && t.status !== 'Done');
+  const dOf = t => t.execDate || t.due || '';
+  const now = rec.filter(t => !dOf(t) || dOf(t) <= today).sort((a, b) => dOf(a).localeCompare(dOf(b)) || String(a.startTime || '').localeCompare(String(b.startTime || '')));
+  const soon = rec.filter(t => dOf(t) > today && dOf(t) <= wk).sort((a, b) => dOf(a).localeCompare(dOf(b)));
+  if (!now.length && !soon.length) return '';
+  const row = t => {
+    const d = dOf(t), late = d && d < today;
+    return '<div class="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-slate-200">' +
+      '<button class="focus-act flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-slate-300 bg-white text-lg text-slate-300 hover:border-emerald-500 hover:text-emerald-500" data-id="' + esc(t.id) + '" data-act="Done" aria-label="完了">✓</button>' +
+      '<div class="min-w-0 flex-1"><p class="open-task cursor-pointer truncate text-sm font-semibold text-slate-800" data-id="' + esc(t.id) + '">' + esc(t.name) + '</p>' +
+        '<p class="flex flex-wrap gap-x-2 text-[11px] text-slate-500"><span>🔁 ' + esc(t.repeatRule) + (t.repeatDow ? '（' + esc(t.repeatDow) + '）' : '') + '</span>' +
+        (d ? '<span class="' + (late ? 'font-semibold text-rose-600' : '') + '">' + (late ? '⚠ ' : '') + esc(d.slice(5)) + (late ? '（' + (-dayDiff(today, d)) + '日前）' : '') + '</span>' : '') +
+        (t.hasTime && t.startTime ? '<span>⏰ ' + esc(t.startTime) + '</span>' : '') +
+        (t.project ? '<span class="truncate">📁 ' + esc((S.projMap[t.project] || {}).name || '') + '</span>' : '') + '</p></div></div>';
+  };
+  return '<div><h3 class="mb-1.5 mt-4 text-xs font-bold text-slate-500">🔁 繰り返しタスク（今日・過ぎたもの ' + now.length + '件）</h3>' +
+    (now.length ? '<div class="space-y-1.5">' + now.map(row).join('') + '</div>' : '<p class="text-[11px] text-slate-400">今日の分は済みました</p>') +
+    (soon.length ? '<details class="mt-2"><summary class="cursor-pointer text-[11px] text-slate-500">7日先までの繰り返し（' + soon.length + '件）</summary><div class="mt-1.5 space-y-1.5">' + soon.map(row).join('') + '</div></details>' : '') +
   '</div>';
 }
 
@@ -6159,7 +6416,8 @@ function renderFlow() {
       // 担当者は「連絡する・依頼する」「連絡待ち」のときだけ
       (isContactGtd(d.gtd) ?
         '<div class="mt-3"><p class="lbl">担当者（連絡・依頼の相手）</p>' +
-          '<input id="flowAssignee" list="assigneeList" class="inp py-1.5 text-xs" autocomplete="off" placeholder="タップして一覧から選ぶ／名前を入力" value="' + esc(d.assignee || '') + '"></div>' : '') +
+          '<input id="flowAssignee" class="inp py-1.5 text-xs" autocomplete="off" placeholder="名前・メールで検索（タップで一覧）" value="' + esc(d.assignee || '') + '">' +
+          '<div id="flowAssigneeHits" class="mt-1 hidden max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white"></div></div>' : '') +
 
       '<div class="mt-3 grid gap-3 sm:grid-cols-2">' +
         '<div><p class="lbl">📁 フォルダ</p>' +
@@ -7180,19 +7438,26 @@ function assigneeCandidates() {
   S.tasks.forEach(t => { if (t.assignee) set[t.assignee] = true; });
   return Object.keys(set).sort();
 }
-function renderAssigneeHits(q) {
-  const box = $('#mAssigneeHits');
+/**
+ * 担当者の候補（2026-11-07：入力欄に触れた時点で一覧を出し、打った文字でその場で絞り込む）
+ * q：'*' = ▾一覧ボタン（開閉）／'*open' = 入力欄に触れた（開くだけ）／それ以外 = 検索語
+ * 編集画面（#mAssignee）と高速整理（#flowAssignee）の両方で使う
+ */
+function renderAssigneeHits(q, boxSel, inputSel) {
+  const box = $(boxSel || '#mAssigneeHits');
   if (!box) return;
-  const all = q === '*';   // ▾ 一覧：検索せずに全員を出す（トグルで開閉）
-  if (all && !box.classList.contains('hidden') && box.dataset.all === '1') { box.classList.add('hidden'); box.dataset.all = ''; return; }
-  const terms = all ? [] : searchTerms(q);
-  if (!all && !terms.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
-  box.dataset.all = all ? '1' : '';
-  const list = all ? assigneeCandidates() : assigneeCandidates().filter(a => matchTerms(a, terms)).slice(0, 30);
+  const toggle = q === '*', open = q === '*open';
+  if (toggle && !box.classList.contains('hidden') && box.dataset.all === '1') { box.classList.add('hidden'); box.dataset.all = ''; return; }
+  const terms = toggle || open ? [] : searchTerms(q);
+  if (!toggle && !open && !terms.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  box.dataset.all = toggle || open ? '1' : '';
+  const cands = assigneeCandidates();
+  const list = terms.length ? cands.filter(a => matchTerms(a, terms)).slice(0, 50) : cands;
   box.classList.remove('hidden');
-  box.innerHTML = list.length
-    ? list.map(a => '<button type="button" class="as-hit block w-full truncate px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-indigo-50" data-v="' + esc(a) + '">' + esc(a) + '</button>').join('')
-    : '<p class="px-2 py-1.5 text-[11px] text-slate-400">一致なし（この名前のまま保存できます）</p>';
+  box.innerHTML = '<p class="sticky top-0 bg-white px-2 py-1 text-[10px] text-slate-400">' + (terms.length ? '「' + esc(q.trim()) + '」で ' + list.length + '件' : '全 ' + cands.length + '件（入力すると絞り込めます）') + '</p>' +
+    (list.length
+      ? list.map(a => '<button type="button" class="as-hit block w-full truncate px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-indigo-50" data-v="' + esc(a) + '" data-input="' + esc(inputSel || '#mAssignee') + '" data-box="' + esc(boxSel || '#mAssigneeHits') + '">' + esc(a) + '</button>').join('')
+      : '<p class="px-2 py-1.5 text-[11px] text-slate-400">一致なし（この名前のまま保存できます）</p>');
 }
 
 /* ---- 関連プロジェクト ---- */
@@ -7424,12 +7689,57 @@ function saveTask() {
   if (!task.gtd) task.gtd = '00_INBOX';
 
   localSave(task);                    // 画面は即座に更新し、送信は裏で行う
+  if (editingId && (base.repeatRule || task.repeatRule)) propagateToNextOccurrences(base, task);
   clearTaskDraft();                   // 保存したので下書きは不要
   S.historyCache = {};
   const wasNew = !editingId;
   closeTask();
   renderCurrent();
   toast(wasNew ? '追加しました（未同期）' : '保存しました（未同期）');
+}
+
+/**
+ * 繰り返しタスクを直したとき、すでにできている「次の回」（未完了）にも同じ直しを入れるか聞く（2026-11-07）
+ * -------------------------------------------------------------------------
+ * 次の回は、前の回を写して作られる。「期限が過ぎても残す」などで前の回を直したときに次の回が
+ * もうできていると、次の回は古い名前・古い絶対期限のまま残り、「直したのに戻った」ように見える。
+ * 日付の項目は回ごとに違うので写さない。絶対期限だけは「ずらした日数」を同じだけずらす。
+ */
+const PROPAGATE_FIELDS = ['name', 'memo', 'project', 'importance', 'location', 'place', 'estMin', 'assignee', 'asap', 'keepOverdue',
+  'repeatRule', 'repeatNum', 'repeatDow', 'gtd', 'attach', 'relatedProjects'];
+function nextOccurrences(id) {
+  const out = [], seen = {};
+  let frontier = [id];
+  for (let g = 0; g < 30 && frontier.length; g++) {
+    const kids = S.tasks.filter(t => frontier.indexOf(t.parent) >= 0 && !seen[t.id]);
+    kids.forEach(k => { seen[k.id] = true; if (k.status !== 'Done') out.push(k); });
+    frontier = kids.map(k => k.id);
+  }
+  return out;
+}
+function propagateToNextOccurrences(before, after) {
+  const changed = PROPAGATE_FIELDS.filter(k => JSON.stringify(before[k] === undefined ? '' : before[k]) !== JSON.stringify(after[k] === undefined ? '' : after[k]));
+  const hardChanged = (before.hardDue || '') !== (after.hardDue || '');
+  if (!changed.length && !hardChanged) return;
+  const next = nextOccurrences(after.id);
+  if (!next.length) return;
+  const labels = { name: '名前', memo: 'メモ', project: 'フォルダ', importance: '重要度', repeatRule: '繰り返し', assignee: '担当者' };
+  const what = changed.map(k => labels[k]).filter(Boolean).concat(hardChanged ? ['絶対期限'] : []);
+  if (!confirm('この繰り返しの次の回（未完了 ' + next.length + '件）にも、同じ変更を入れますか？\n\n変えた項目：' + (what.join('・') || 'その他') +
+      '\n\n（「キャンセル」なら、この回だけを変えます）')) return;
+  next.forEach(d => {
+    changed.forEach(k => { d[k] = Array.isArray(after[k]) ? after[k].slice() : after[k]; });
+    if (hardChanged) {
+      if (!after.hardDue) d.hardDue = '';
+      else if (before.hardDue && d.hardDue) d.hardDue = addDays(d.hardDue, dayDiff(before.hardDue, after.hardDue));
+      else {
+        const b0 = after.execDate || after.due, d0 = d.execDate || d.due;
+        d.hardDue = b0 && d0 ? addDays(d0, dayDiff(b0, after.hardDue)) : after.hardDue;
+      }
+    }
+    localSave(d);
+  });
+  toast('次の回 ' + next.length + '件にも反映しました');
 }
 
 function deleteTask() {
@@ -7551,7 +7861,7 @@ function switchCfgTab(tab) {
   });
   const R = { sort: renderCfgSort, slices: renderCfgSlices, sorts: renderCfgSorts, columns: renderCfgColumns,
               tabs: renderCfgTabs, about: renderCfgAbout, defaults: renderCfgDefaults, places: renderCfgPlaces,
-              plan: renderCfgPlan, share: renderCfgShare, ai: renderCfgAi, masters: renderCfgMasters, fields: renderCfgFields };
+              plan: renderCfgPlan, share: renderCfgShare, ai: renderCfgAi, dept: renderCfgDept, masters: renderCfgMasters, fields: renderCfgFields };
   (R[tab] || renderCfgMasters)();
 }
 
@@ -7910,7 +8220,7 @@ function syncPlaceForm() {
 /* ========== 📅 計画 ========== */
 function renderCfgPlan() {
   const c = Object.assign({}, capacityCfg(), CFG.draft.capacity || {});
-  const pm = Object.assign({ work: 25, short: 5, long: 15 }, CFG.draft.pomodoro || {});
+  const pm = Object.assign({ work: 25, short: 5, long: 15, longEvery: 4, sets: 0 }, CFG.draft.pomodoro || {});
   const ri = (CFG.draft.reviewIntervals || [1, 3, 7, 14, 30]).join(', ');
   const num = (id, v, unit) => '<input id="' + id + '" type="number" min="0" class="inp w-24 py-1.5 text-right text-xs" value="' + esc(v) + '"> <span class="text-xs text-slate-500">' + unit + '</span>';
   $('#cfgBody').innerHTML =
@@ -7937,8 +8247,13 @@ function renderCfgPlan() {
     cfgCard('📚 復習の間隔', '<input id="revInt" class="inp py-1.5 text-xs" value="' + esc(ri) + '">',
       '「復習」ボタンで作る復習タスクの間隔（日）。既定は忘却曲線に沿った 1, 3, 7, 14, 30 日後です。') +
     cfgCard('🍅 ポモドーロ',
-      '<div class="flex flex-wrap gap-3 text-xs"><label>集中 ' + num('pmWork', pm.work, '分') + '</label>' +
-      '<label>小休憩 ' + num('pmShort', pm.short, '分') + '</label><label>長休憩 ' + num('pmLong', pm.long, '分') + '</label></div>') +
+      '<div class="flex flex-wrap gap-3 text-xs"><label>作業 ' + num('pmWork', pm.work, '分') + '</label>' +
+      '<label>休憩 ' + num('pmShort', pm.short, '分') + '</label></div>' +
+      '<div class="mt-2 flex flex-wrap gap-3 text-xs"><label>' + num('pmLongEvery', pm.longEvery, 'セットごとに') + '</label>' +
+      '<label>大休憩 ' + num('pmLong', pm.long, '分') + '</label></div>' +
+      '<div class="mt-2 flex flex-wrap gap-3 text-xs"><label>全部で ' + num('pmSets', pm.sets, 'セットやったら終わる') + '</label></div>',
+      '1セット＝作業＋休憩。決めたセット数ごとに休憩の代わりに大休憩が入ります。「全部で」を 0 にすると、止めるまで続けます。' +
+      '作業をやりきった回数と集中した時間は記録され、ホームに出ます（途中で止めても1分以上なら時間に入ります）。') +
     (S.user && S.user.isOwner ? cfgCard('🔮 来年の予測カレンダー',
       '<button type="button" id="btnYearForecast" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs">今年の実績から来年の予測カレンダーを作る</button>',
       '今年のタスク（日付・名前・大分類）をAIに渡し、来年も起きそうな予定や締切を「AI予測 来年」という別カレンダーに入れます。' +
@@ -8043,7 +8358,6 @@ const TAB_DEFS = [
   { id: 'plan',     label: '📅 計画' },
   { id: 'kanban',   label: 'タスク' },
   { id: 'gantt',    label: 'ガントチャート' },
-  { id: 'memo',     label: 'プロジェクトメモ' },
   { id: 'inbox',    label: '📥 Inbox整理' },
   { id: 'projects', label: '📁 フォルダ' },
   { id: 'all',      label: '全タスク検索' },
@@ -8244,7 +8558,8 @@ function collectCfg() {
       const mainI = $$('.cal-main').filter(r => r.checked).map(r => Number(r.value))[0];
       (d.calendars || []).forEach((c, i) => { c.main = i === mainI; });
       d.reviewIntervals = $('#revInt').value.split(/[,、\s]+/).map(Number).filter(n => n > 0);
-      d.pomodoro = { work: Number($('#pmWork').value || 25), short: Number($('#pmShort').value || 5), long: Number($('#pmLong').value || 15) };
+      d.pomodoro = { work: Number($('#pmWork').value || 25), short: Number($('#pmShort').value || 5), long: Number($('#pmLong').value || 15),
+                     longEvery: Math.max(1, Number($('#pmLongEvery').value || 4)), sets: Math.max(0, Number($('#pmSets').value || 0)) };
     }
   } else if (CFG.tab === 'share') {
     if ($('#cpOn')) {
@@ -9316,7 +9631,83 @@ function watchModals() {
   syncFab();
 }
 
+/* =========================================================================
+ * ← 戻る / → 進む（2026-11-07）
+ * =========================================================================
+ * 画面の切り替え・フォルダの移動をブラウザの履歴に積む。ヘッダーの ← → でも、
+ * スマホの「戻る」ボタン（ブラウザ・アプリの戻る）でも、1つ前の画面に戻れる。
+ * 編集画面などが開いているときに「戻る」を押したら、画面は移らずに編集画面を閉じる。
+ */
+const NAV = {
+  ready: false, idx: 0, max: 0, suppress: false,
+  state() { return { gtd: 1, view: S.view, folder: S.folderAt || '', i: this.idx }; },
+  push() {
+    if (this.suppress) return;
+    try {
+      if (!this.ready) { this.ready = true; history.replaceState(this.state(), ''); this.sync(); return; }
+      const cur = history.state;
+      if (cur && cur.gtd && cur.view === S.view && (cur.folder || '') === (S.folderAt || '')) return;
+      this.idx++; this.max = this.idx;
+      history.pushState(this.state(), '');
+    } catch (e) {}
+    this.sync();
+  },
+  pop(st) {
+    if (!st || !st.gtd) return;
+    if (anyModalOpen()) {
+      // 開いている画面を閉じるだけにして、元の場所に留まる
+      try { history.pushState(Object.assign(this.state(), { i: this.idx }), ''); } catch (e) {}
+      this.max = this.idx;
+      if (!$('#modal').classList.contains('hidden')) requestCloseTask();
+      else MODAL_IDS.forEach(sel => { const el = $(sel); if (el && sel !== '#modal') el.classList.add('hidden'); });
+      syncFab(); this.sync();
+      return;
+    }
+    this.idx = st.i || 0;
+    this.suppress = true;
+    S.folderAt = st.folder || '';
+    switchView(st.view || 'home');
+    this.suppress = false;
+    this.sync();
+  },
+  sync() {
+    const b = $('#navBack'), f = $('#navFwd');
+    if (b) b.disabled = this.idx <= 0;
+    if (f) f.disabled = this.idx >= this.max;
+  }
+};
+window.addEventListener('popstate', e => NAV.pop(e.state));
+/* フォルダ画面のドラッグ＆ドロップ（PC のマウス操作。スマホは ✂ 切り取り → 貼り付け） */
+document.addEventListener('dragstart', e => {
+  const src = e.target.closest && e.target.closest('#view-projects [data-drag]');
+  if (!src) return;
+  try { e.dataTransfer.setData('text/plain', src.dataset.drag); e.dataTransfer.effectAllowed = 'move'; } catch (x) {}
+  S.dragItem = src.dataset.drag;
+});
+document.addEventListener('dragover', e => {
+  const tg = S.dragItem && e.target.closest && e.target.closest('#view-projects .fold-drop');
+  if (!tg) return;
+  e.preventDefault();
+  $$('#view-projects .drop-hover').forEach(x => { if (x !== tg) x.classList.remove('drop-hover'); });
+  tg.classList.add('drop-hover');
+});
+document.addEventListener('dragleave', e => { const tg = e.target.closest && e.target.closest('.fold-drop'); if (tg) tg.classList.remove('drop-hover'); });
+document.addEventListener('drop', e => {
+  const tg = S.dragItem && e.target.closest && e.target.closest('#view-projects .fold-drop');
+  if (!tg) return;
+  e.preventDefault();
+  $$('#view-projects .drop-hover').forEach(x => x.classList.remove('drop-hover'));
+  const parts = String(S.dragItem).split(':'); S.dragItem = null;
+  moveToFolder(parts[0], parts.slice(1).join(':'), tg.dataset.drop || '');
+});
+document.addEventListener('dragend', () => { S.dragItem = null; $$('#view-projects .drop-hover').forEach(x => x.classList.remove('drop-hover')); });
+document.addEventListener('click', e => {
+  if (e.target.closest('#navBack')) { try { history.back(); } catch (x) {} return; }
+  if (e.target.closest('#navFwd')) { try { history.forward(); } catch (x) {} }
+});
+
 function switchView(v) {
+  if (v === 'memo') v = 'notes';        // 2026-11-07「プロジェクトメモ」は「メモ」に統合
   HDR.show();
   S.view = v;
   $$('.tabbtn').forEach(b => { b.dataset.active = b.dataset.view === v ? '1' : '0'; });
@@ -9326,6 +9717,7 @@ function switchView(v) {
   $('#view-' + v).classList.remove('hidden');
   $('#view-' + v).classList.add('fade-in');
   renderCurrent();
+  NAV.push();
 }
 
 let tickHandle = null, alertHandle = null;
@@ -9773,7 +10165,7 @@ function bindEvents() {
     const po = e.target.closest('.proj-open');
     if (po) { S.f.project = [po.dataset.pid]; renderMultiSelects(); switchView('kanban'); return; }
     const pm = e.target.closest('.proj-memo');
-    if (pm) { S.memoProjects = [pm.dataset.pid]; switchView('memo'); return; }
+    if (pm) { S.notesProj = pm.dataset.pid; switchView('notes'); return; }
     const pe = e.target.closest('.proj-edit');
     if (pe) { openProject(pe.dataset.pid); return; }
     const pd = e.target.closest('.proj-del');
@@ -9781,6 +10173,10 @@ function bindEvents() {
     if (e.target.id === 'projNew') { openProject('', { parent: S.folderAt || '' }); return; }
     if (e.target.id === 'foldTaskNew') { openTask(null, { preset: { project: S.folderAt || '' } }); return; }
     if (e.target.id === 'projClear') { S.projQ = ''; S.projCats = []; renderProjects(); return; }
+    const cc = e.target.closest('.clip-cut');
+    if (cc) { e.stopPropagation(); S.clip = { kind: cc.dataset.kind, id: cc.dataset.id }; renderProjects(); toast('✂ 切り取りました。移したい先のフォルダを開いて「📋 ここに貼り付け」を押してください'); return; }
+    if (e.target.id === 'clipCancel') { S.clip = null; renderProjects(); return; }
+    if (e.target.id === 'clipPaste' && S.clip) { const c = S.clip; S.clip = null; moveToFolder(c.kind, c.id, S.folderAt || '').then(ok => { if (!ok) { S.clip = c; renderProjects(); } }); return; }
     const ppk = e.target.closest('.pp-pick');
     if (ppk) { $('#pParent').value = ppk.dataset.id; renderParentPicker(); return; }
     const ftt = e.target.closest('.ft-tog');
@@ -9789,15 +10185,15 @@ function bindEvents() {
     if (ftg) {
       S.folderAt = ftg.dataset.fid || ''; S.projQ = '';
       if (S.folderAt && folderChildren(S.folderAt).length) { foldOpenMap()[S.folderAt] = true; foldOpenSave(); }   // 選んだら中も開く
-      renderProjects(); return;
+      renderProjects(); NAV.push(); return;
     }
     if (e.target.closest('.ft-all')) { S.foldOpen = {}; foldOpenSave(); renderProjects(); return; }
     if (e.target.closest('.ft-hide')) { S.treeHidden = !S.treeHidden; renderProjects(); return; }
     const fg = e.target.closest('.fold-go');
-    if (fg) { S.folderAt = fg.dataset.fid || ''; S.projQ = ''; renderProjects(); window.scrollTo(0, 0); return; }
+    if (fg) { S.folderAt = fg.dataset.fid || ''; S.projQ = ''; renderProjects(); NAV.push(); window.scrollTo(0, 0); return; }
     const pc = e.target.closest('.proj-card');
     // カード本体 → そのフォルダの中へ（Explorer と同じ。編集は ✎ ボタン）
-    if (pc && !e.target.closest('button')) { S.folderAt = pc.dataset.pid; S.projQ = ''; renderProjects(); window.scrollTo(0, 0); }
+    if (pc && !e.target.closest('button')) { S.folderAt = pc.dataset.pid; S.projQ = ''; renderProjects(); NAV.push(); window.scrollTo(0, 0); }
   });
 
   // 設定：タブ並べ替え・セクション表示・繰り返し補正
@@ -10047,6 +10443,29 @@ function bindEvents() {
         const r = await api.aiTest(d.ai.roles[k]);
         out.textContent = '✓ ' + (r.reply || '応答あり'); out.className = 'ai-test-out text-[11px] text-emerald-600';
       } catch (err) { out.textContent = '✕ ' + (err.message || err); out.className = 'ai-test-out text-[11px] text-rose-600'; }
+      return;
+    }
+    if (btn && btn.id === 'deptSave') {
+      const url = $('#deptUrl').value.trim(), key = $('#deptKey').value.trim();
+      busy(true, '接続テスト中…');
+      try {
+        await api.setDeptLink('kakeibo', url, key, '');
+        $('#deptKey').value = '';
+        const r = await api.refreshDeptBriefings();
+        S.dept = r;
+        const a = (r.apps || {}).kakeibo;
+        toast(a && a.ok ? '✓ つながりました' : '保存しましたが取得できません: ' + ((a && a.error) || ''), a && a.ok ? '' : 'warn');
+        renderCfgDept();
+      } catch (err) { toast('保存に失敗: ' + (err.message || err), 'err'); }
+      finally { busy(false); }
+      return;
+    }
+    if (btn && btn.id === 'deptClear') {
+      if (!confirm('財務部との接続を外しますか？（保存したキーも消えます）')) return;
+      busy(true, '解除中…');
+      try { await api.clearDeptLink('kakeibo'); S.dept = { apps: {} }; renderCfgDept(); toast('接続を外しました'); }
+      catch (err) { toast('失敗: ' + (err.message || err), 'err'); }
+      finally { busy(false); }
       return;
     }
     if (cls('ai-key-save')) {
@@ -10351,6 +10770,8 @@ function bindEvents() {
   document.addEventListener('click', async e => {
     const hg = e.target.closest('.home-go');
     if (hg) { switchView(hg.dataset.go); return; }
+    if (e.target.closest('.dept-refresh')) { loadDept(true); return; }
+    if (e.target.closest('.dept-setup')) { openCfg('dept'); return; }
     const pg = e.target.closest('.plan-go');
     if (pg) {
       if (pg.dataset.v === 'week') S.planMode = 'week';
@@ -10431,6 +10852,7 @@ function bindEvents() {
     if (e.target.id === 'planDate') { S.planMode = 'day'; S.planDate = e.target.value || todayStr(); if (S.yn && S.yn.date !== S.planDate) S.yn = null; renderPlan(); }
     if (e.target.id === 'ynPushNo' && S.yn) { S.yn.pushNo = e.target.checked; }
     if (e.target.id === 'notesProj') { S.notesProj = e.target.value; renderNotes(); }
+    if (e.target.id === 'notesWithTasks') { S.notesWithTasks = e.target.checked; renderNotes(); }
   });
   document.addEventListener('input', e => {
     if (e.target.id === 'notesQ' && !e.isComposing) { S.notesQ = e.target.value; const pos = e.target.selectionStart; renderNotes(); const el = $('#notesQ'); el.focus(); el.setSelectionRange(pos, pos); }
@@ -10540,12 +10962,24 @@ function bindEvents() {
     }
     if (e.target.closest('.as-all')) { e.preventDefault(); renderAssigneeHits('*'); return; }
     const ah = e.target.closest('.as-hit');
-    if (ah) { $('#mAssignee').value = ah.dataset.v; renderAssigneeHits(''); syncClearButtons($('#modal')); scheduleDraftSave(); return; }
+    if (ah && (ah.dataset.input || '#mAssignee') === '#mAssignee') { $('#mAssignee').value = ah.dataset.v; renderAssigneeHits(''); syncClearButtons($('#modal')); scheduleDraftSave(); return; }
     if (e.target.closest('[data-open-places]')) { openCfg('places'); return; }
     const act = e.target.closest('.m-act');
     if (act && editingId) { await taskAction(editingId, act.dataset.act); return; }
   });
-  $('#mAssignee').addEventListener('input', e => renderAssigneeHits(e.target.value));
+  $('#mAssignee').addEventListener('input', e => { if (!e.isComposing) renderAssigneeHits(e.target.value || '*open'); });
+  $('#mAssignee').addEventListener('compositionend', e => renderAssigneeHits(e.target.value || '*open'));
+  $('#mAssignee').addEventListener('focus', e => renderAssigneeHits(e.target.value || '*open'));
+  // 高速整理の担当者も同じ検索つきの候補にする
+  document.addEventListener('input', e => { if (e.target.id === 'flowAssignee' && !e.isComposing) renderAssigneeHits(e.target.value || '*open', '#flowAssigneeHits', '#flowAssignee'); });
+  document.addEventListener('focusin', e => { if (e.target.id === 'flowAssignee') renderAssigneeHits(e.target.value || '*open', '#flowAssigneeHits', '#flowAssignee'); });
+  document.addEventListener('click', e => {
+    const ah = e.target.closest('.as-hit[data-input="#flowAssignee"]');
+    if (!ah) return;
+    const inp = $('#flowAssignee'); if (inp) inp.value = ah.dataset.v;
+    if (S.flowDraft) S.flowDraft.assignee = ah.dataset.v;
+    renderAssigneeHits('', '#flowAssigneeHits', '#flowAssignee');
+  });
   $('#mRelatedSearch').addEventListener('input', e => filterRelatedChips(e.target.value));
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
